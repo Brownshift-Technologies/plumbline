@@ -83,6 +83,6 @@ export const api = {
   put: <T>(path: string, body?: unknown, init?: Omit<RequestInit, "body">) =>
     request<T>(path, { ...init, method: "PUT", body }),
 
-  del: <T>(path: string, init?: Omit<RequestInit, "body">) =>
-    request<T>(path, { ...init, method: "DELETE" }),
+  del: <T>(path: string, body?: unknown, init?: Omit<RequestInit, "body">) =>
+    request<T>(path, { ...init, method: "DELETE", body }),
 };

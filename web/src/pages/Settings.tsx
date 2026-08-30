@@ -1,8 +1,15 @@
 import { useState } from "react";
-import { Field } from "../components/Field";
+import { useNavigate } from "react-router-dom";
+import { EmptyState } from "../components/EmptyState";
 import { Button } from "../components/Button";
-import { Pill } from "../components/Pill";
 import { useToast } from "../components/Toast";
+import { api } from "../lib/api";
+import { useCurrentUser } from "../lib/useCurrentUser";
+import { routes } from "../lib/routes";
+import { ProfilePane } from "./settings/ProfilePane";
+import { SecurityPane } from "./settings/SecurityPane";
+import { MembersPane } from "./settings/MembersPane";
+import { BillingPane } from "./settings/BillingPane";
 
 const TABS = ["profile", "security", "members", "billing"] as const;
 type Tab = (typeof TABS)[number];
@@ -14,39 +21,23 @@ const TAB_LABEL: Record<Tab, string> = {
   billing: "Billing",
 };
 
-function ProfilePane() {
-  const { show } = useToast();
-  return (
-    <div>
-      <div className="setrow">
-        <div>
-          <h4>Name</h4>
-          <p>How you appear to your team.</p>
-        </div>
-        <Field label="Name" defaultValue="Roger Koranteng" wrapperStyle={{ margin: 0 }} />
-      </div>
-      <div className="setrow">
-        <div>
-          <h4>Work email</h4>
-          <p>Used to sign in and to send approval requests.</p>
-        </div>
-        <div>
-          <Field label="Work email" type="email" defaultValue="roger@acme.com" />
-          <Pill kind="pass">Verified</Pill>
-        </div>
-      </div>
-      <div style={{ display: "flex", gap: 9, padding: "20px 0" }}>
-        <Button variant="pri" onClick={() => show("Profile saved")}>
-          Save changes
-        </Button>
-        <Button>Discard</Button>
-      </div>
-    </div>
-  );
-}
-
 export function Settings() {
   const [tab, setTab] = useState<Tab>("profile");
+  const navigate = useNavigate();
+  const { show } = useToast();
+  const user = useCurrentUser();
+
+  async function onSignOut() {
+    try {
+      await api.post("/auth/signout");
+    } catch {
+      // Even if the server call fails, drop the client back to sign-in --
+      // staying "signed in" to a session the server has already forgotten
+      // is worse than a stale cookie the next request will reject anyway.
+    }
+    show("Signed out.");
+    navigate(routes.signin);
+  }
 
   return (
     <div className="body" style={{ maxWidth: 940 }}>
@@ -68,10 +59,17 @@ export function Settings() {
           </button>
         ))}
       </div>
-      {tab === "profile" && <ProfilePane />}
-      {tab !== "profile" && (
-        <div style={{ padding: "20px 0", color: "var(--muted)", fontSize: 14 }}>
-          {TAB_LABEL[tab]} settings live here.
+
+      {user.status === "loading" && <EmptyState variant="loading" title="Loading your account…" />}
+      {user.status === "error" && (
+        <EmptyState variant="error" title="Couldn't load your account" description={user.error} actions={<Button onClick={user.reload}>Retry</Button>} />
+      )}
+      {user.status === "success" && (
+        <div role="tabpanel">
+          {tab === "profile" && <ProfilePane user={user} />}
+          {tab === "security" && <SecurityPane user={user} onSignOut={onSignOut} />}
+          {tab === "members" && <MembersPane user={user} />}
+          {tab === "billing" && <BillingPane user={user} />}
         </div>
       )}
     </div>

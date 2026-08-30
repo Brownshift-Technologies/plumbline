@@ -190,3 +190,16 @@ export interface Member {
   role: Role;
   last_active?: number;
 }
+
+export interface TotpEnrollResponse {
+  otpauth_url: string;
+  secret: string;
+}
+
+export interface BillingInvoice {
+  id: string;
+  at: number;
+  amount: number;
+  status: string;
+  url?: string;
+}
