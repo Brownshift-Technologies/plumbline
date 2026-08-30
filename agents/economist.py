@@ -44,10 +44,18 @@ convention above).
 
 **A Sentinel-written behaviour is never considered at all**, for any
 category, regardless of streak length -- filtered out of the candidate
-pool before any of the four checks ever run. `Behaviour.tags` carries
-`"sentinel"` for exactly this (see `agents/sentinel.py`); that test is the
-permanent record of something that actually broke in production, and no
-amount of "hasn't failed in months" makes it safe to flag for removal.
+pool before any of the four checks ever run. Fix round 1: this used to key
+on a `"sentinel"` string inside `Behaviour.tags` -- the same free-form
+field this module's OWN history convention rewrites wholesale, so any
+caller that reconstructed the tuple rather than appended to it would
+silently have dropped the marker, and this module would then have happily
+recommended deleting a test that exists because of a real production
+incident. `Behaviour.source` (`app/models.py`) is a durable, typed field
+set once at creation instead -- `agents/sentinel.py` sets it to
+`"sentinel"` explicitly, and nothing about editing `tags` later can touch
+it. That test is the permanent record of something that actually broke in
+production, and no amount of "hasn't failed in months" makes it safe to
+flag for removal.
 
 Two gateway calls, neither looped: `graph.read` for the route list,
 `repo.read` for behaviours and incidents (the latter, via `core.urls.
@@ -86,7 +94,16 @@ def _tag_str(tags: tuple[str, ...], prefix: str) -> str | None:
 
 
 def _is_sentinel_written(behaviour) -> bool:
-    return "sentinel" in behaviour.tags
+    # Fix round 1: keyed on `Behaviour.source`, a durable typed field set
+    # once at creation -- not a "sentinel" string riding along in `tags`.
+    # `tags` is free-form and documented as such (this module's own
+    # green_streak/repairs/duration_ms/asserts convention rewrites it); a
+    # caller that reconstructs the tuple rather than appending would have
+    # silently dropped a tag-based marker, and then this module would
+    # happily recommend removing a test that exists because of a real
+    # production incident. `source` cannot be lost that way. See
+    # `app/models.py`'s `Behaviour.source` docstring.
+    return behaviour.source == "sentinel"
 
 
 def _recommendation(kind: str, behaviour, minutes_saved: float, coverage_cost: float, reason: str) -> dict:

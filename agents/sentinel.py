@@ -173,7 +173,14 @@ class Sentinel:
                 ctx.repo.put_behaviour(Behaviour(
                     id=f"bh_sentinel_{uuid.uuid4().hex[:12]}", workspace_id=ctx.workspace_id,
                     text=f"Regression (from production): {cluster['message'][:180]}",
-                    route=cluster["route"], spec_path=spec_path, tags=("sentinel", "incident"),
+                    route=cluster["route"], spec_path=spec_path, tags=("incident",),
+                    # `source="sentinel"` (fix round 1) is the durable
+                    # provenance marker Economist keys on -- see
+                    # `app/models.py`'s `Behaviour.source` docstring for why
+                    # this moved off a `tags` string: `tags` is free-form
+                    # and any caller that rewrites it wholesale would drop
+                    # a bare "sentinel" marker silently.
+                    source="sentinel",
                 ))
                 written.append(spec_path)
             for key, cluster in not_reproducible:

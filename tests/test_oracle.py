@@ -11,7 +11,7 @@ fallback, keeping the page dicts keyed by `"/"`.
 import pytest
 
 from agents.oracle import Oracle
-from app.models import Route
+from app.models import Route, Workspace
 from tests.agent_fixtures import make_ctx
 
 _PAY_BUTTON = {"ref": "e1", "role": "button", "name": "Pay"}
@@ -78,6 +78,35 @@ def ctx_500_on_candidate():
     return _ctx({"status": 200}, {"status": 500})
 
 
+@pytest.fixture
+def ctx_status_and_content_diverge():
+    # A route whose status, text, AND a11y all differ between environments
+    # -- pre-fix, this alone produced up to 3 separate divergences for one
+    # route. Status diverging should short-circuit the rest.
+    return _ctx(
+        {"status": 200, "text": "OK", "a11y": [_PAY_BUTTON]},
+        {"status": 500, "text": "Internal Server Error", "a11y": []},
+    )
+
+
+@pytest.fixture
+def ctx_environment_down():
+    # The reviewer's own reproduction (fix round 1, IMPORTANT): 20 routes,
+    # baseline healthy and candidate uniformly 500ing -- a total outage of
+    # the candidate environment, not 20 unrelated bugs.
+    n = 20
+    baseline_pages = {
+        f"/r{i}": {"status": 200, "text": f"Page {i}",
+                    "a11y": [{"ref": f"e{i}", "role": "button", "name": f"Action {i}"}]}
+        for i in range(n)
+    }
+    candidate_pages = {f"/r{i}": {"status": 500, "text": "Internal Server Error"} for i in range(n)}
+    ctx = make_ctx(browsers={"baseline": baseline_pages, "candidate": candidate_pages})
+    for i in range(n):
+        ctx.repo.put_route(Route(id=f"rt{i}", workspace_id="ws1", path=f"/r{i}", coverage_pct=10))
+    return ctx
+
+
 # --- from the brief -------------------------------------------------------
 
 
@@ -138,3 +167,47 @@ def test_a_volatile_configured_pattern_does_not_disable_the_built_in_ones(ctx_ti
 def test_oracle_holds_no_write_scope():
     from gateway.policy import SCOPES
     assert not any(tool.startswith(("repo.write", "pr.", "graph.write")) for tool in SCOPES["oracle"])
+
+
+# --- fix round 1: consolidation (IMPORTANT) --------------------------------
+
+
+def test_a_status_divergence_skips_the_sub_comparisons(ctx_status_and_content_diverge):
+    out = Oracle("baseline", "candidate").run(ctx_status_and_content_diverge)
+    assert len(out.data["divergences"]) == 1
+    assert out.data["divergences"][0]["type"] == "status_code_changed"
+
+
+def test_a_total_outage_produces_one_finding_not_hundreds(ctx_environment_down):
+    # Pre-fix, this scenario returned 20 status + 20 text + 20 network +
+    # up to 100 element divergences -- 160 entries that all say the same
+    # one thing. Post-fix: one environment-wide finding.
+    out = Oracle("baseline", "candidate").run(ctx_environment_down)
+    assert out.data["compared"] == 20
+    assert len(out.data["divergences"]) == 1
+    divergence = out.data["divergences"][0]
+    assert divergence["type"] == "environment_wide:status_code_changed"
+    assert divergence["baseline"] == 200 and divergence["candidate"] == 500
+    assert len(divergence["affected_routes"]) == 20
+    assert divergence["severity"] == "critical"
+
+
+def test_an_isolated_divergence_is_never_rolled_up(ctx_two_divergences):
+    # Two DIFFERENT signatures on two routes must never meet the majority
+    # threshold -- roll-up is for "this is a fact about the environment",
+    # not a way to compress a genuinely isolated regression away.
+    out = Oracle("baseline", "candidate").run(ctx_two_divergences)
+    assert len(out.data["divergences"]) == 2
+    assert all(d["route"] != "*" for d in out.data["divergences"])
+
+
+# --- fix round 1: policy-deny surfaces as an error (MINOR) -----------------
+
+
+def test_a_denied_read_surfaces_as_an_error_not_a_silent_skip(ctx_missing_button):
+    from gateway.gateway import GatewayError
+    ctx_missing_button.repo.put_workspace(Workspace(
+        id="ws1", name="Acme", repo="acme/storefront",
+        gate_rules=({"tool": "browser.read", "pattern": "*", "effect": "deny"},)))
+    with pytest.raises(GatewayError):
+        Oracle("baseline", "candidate").run(ctx_missing_button)

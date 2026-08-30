@@ -46,6 +46,38 @@ Triager finding derived from an actual test failure, never from this
 module directly) knows which side is right. This module never calls
 `ctx.repo.put_finding`/`put_patch`/anything -- it only returns data.
 
+**Consolidated, never one-entry-per-symptom.** Fix round 1: a reviewer
+built a 20-route total-outage scenario (the candidate environment simply
+down) and the pre-fix version returned 160 divergences -- a status change,
+a text change, a network change, and up to five element changes, PER
+ROUTE, all saying the same one thing twenty different ways. The brief's
+own acid test is "one useful finding or five hundred useless ones", and a
+tool that cries wolf at that volume trains everyone to ignore it, the same
+failure mode `_mask`'s volatility handling above exists to prevent for a
+single route. Two levels of roll-up fix this, both applied before ranking:
+
+1. **Per-route**: `_compare_route` checks status FIRST and, if it
+   diverges, returns immediately -- text/a11y/network are never even
+   compared for that route. A page returning 500 has no meaningful DOM to
+   diff against a 200 page's; the sub-comparisons would only ever add
+   noise once the status itself has already said everything.
+2. **Environment-wide**: `_rollup` groups the per-route divergences that
+   remain by their exact `(type, baseline, candidate)` signature and, when
+   the SAME signature recurs across at least half of the routes compared
+   (and more than one), collapses that whole group into ONE
+   `"environment_wide:<type>"` finding naming every affected route, rather
+   than reporting the identical fact once per route. A genuinely isolated
+   divergence -- the two-divergence blast-radius test below, where
+   `/checkout/payment` and `/footer` diverge on DIFFERENT signatures --
+   never meets that majority threshold and is reported exactly as before.
+
+A route made unreachable outright (`BrowserGotoError` -- the same "this
+route doesn't resolve at all" shape `agents/cartographer.py` already
+treats as a routing fact, not a crash) is folded into the same
+status-comparison path via `_goto_status`, which reports a synthetic
+`status="unreachable"` rather than letting the exception propagate and
+abort the whole batch over one dead route on one side.
+
 Two gateway calls, neither looped: `graph.read` for the route list once,
 `browser.read` for the whole route-by-route diff pass once (matching every
 other batched crawl/audit in this fleet).
@@ -54,8 +86,13 @@ other batched crawl/audit in this fleet).
 import re
 
 from agents.base import AgentResult
+from agents.browser import BrowserGotoError
 
 MAX_ROUTES = 50
+# A signature shared by at least this fraction of the routes compared (and
+# by more than one route) is treated as an environment-wide fact, not a
+# per-route coincidence -- see `_rollup` and the module docstring.
+ROLLUP_MAJORITY = 0.5
 
 _CRITICAL_ROUTE = re.compile(r"checkout|payment|billing|cart", re.I)
 
@@ -117,15 +154,37 @@ def _divergence(route: str, kind: str, baseline, candidate) -> dict:
     }
 
 
-def _compare_route(route: str, baseline, candidate, extra: list[re.Pattern]) -> list[dict]:
-    baseline.goto(route)
-    candidate.goto(route)
-    b_snap, c_snap = baseline.snapshot(), candidate.snapshot()
-    divergences = []
+def _goto_status(driver, route: str) -> dict:
+    """Navigate `driver` to `route` and return its snapshot -- or, if the
+    route is entirely unreachable on this environment at all
+    (`BrowserGotoError`), a synthetic snapshot reporting
+    `status="unreachable"` so the rest of this module needs no special
+    case for a side that never loaded. This is what lets a "candidate is
+    completely down" scenario (every route refuses to connect, rather than
+    connecting and returning a 5xx) fold into the exact same status-
+    comparison and roll-up path as an ordinary status-code change."""
+    try:
+        driver.goto(route)
+    except BrowserGotoError:
+        return {"status": "unreachable"}
+    return driver.snapshot()
 
+
+def _compare_route(route: str, baseline, candidate, extra: list[re.Pattern]) -> list[dict]:
+    b_snap = _goto_status(baseline, route)
+    c_snap = _goto_status(candidate, route)
+
+    # Status is checked FIRST and, if it diverges, ends this route's
+    # comparison right here -- see the module docstring's roll-up section.
+    # A page that isn't even returning the same status has no meaningful
+    # DOM/network shape to diff against the other side's; comparing them
+    # anyway is exactly the "up to four findings that all say one thing"
+    # shape a reviewer demonstrated at 20-route scale.
     b_status, c_status = b_snap.get("status", 200), c_snap.get("status", 200)
     if b_status != c_status:
-        divergences.append(_divergence(route, "status_code_changed", b_status, c_status))
+        return [_divergence(route, "status_code_changed", b_status, c_status)]
+
+    divergences = []
 
     b_text = _mask(b_snap.get("text", ""), extra)
     c_text = _mask(c_snap.get("text", ""), extra)
@@ -145,6 +204,49 @@ def _compare_route(route: str, baseline, candidate, extra: list[re.Pattern]) -> 
         divergences.append(_divergence(route, "network_changed", b_net, c_net))
 
     return divergences
+
+
+def _signature(d: dict) -> tuple:
+    # `repr(...)` on baseline/candidate rather than the raw values: some
+    # divergence payloads are dicts/lists (`missing_element`,
+    # `network_changed`), which are not hashable and cannot be dict keys
+    # directly -- their repr is a stable enough proxy for "the same fact".
+    return (d["type"], repr(d["baseline"]), repr(d["candidate"]))
+
+
+def _rollup(divergences: list[dict], total_routes: int) -> list[dict]:
+    """Collapse an environment-wide divergence -- the exact same `(type,
+    baseline, candidate)` triple recurring across a majority of the routes
+    compared -- into ONE finding, rather than reporting the identical fact
+    once per route. See the module docstring's fix-round-1 note for the
+    160-divergence total-outage scenario this exists to prevent.
+
+    A signature shared by only one route (however severe) is never rolled
+    up -- roll-up is specifically for "this is a fact about the
+    ENVIRONMENT", never a way to hide a single route's own real
+    divergence."""
+    if total_routes < 2 or not divergences:
+        return divergences
+
+    groups: dict[tuple, list[dict]] = {}
+    for d in divergences:
+        groups.setdefault(_signature(d), []).append(d)
+
+    rolled: list[dict] = []
+    for group in groups.values():
+        routes = sorted({d["route"] for d in group})
+        if len(routes) > 1 and len(routes) >= max(2, total_routes * ROLLUP_MAJORITY):
+            sample = group[0]
+            rolled.append({
+                "route": "*", "type": f"environment_wide:{sample['type']}",
+                "baseline": sample["baseline"], "candidate": sample["candidate"],
+                "severity": "critical",
+                "blast_radius": max(d["blast_radius"] for d in group),
+                "affected_routes": routes,
+            })
+        else:
+            rolled.extend(group)
+    return rolled
 
 
 class Oracle:
@@ -176,6 +278,7 @@ class Oracle:
             target=f"diff of {len(paths)} route(s): {self.baseline_env} vs {self.candidate_env}",
             fn=compare_all,
         )
+        divergences = _rollup(divergences, len(paths))
         divergences.sort(key=lambda d: (-d["blast_radius"], d["route"], d["type"]))
 
         return AgentResult(

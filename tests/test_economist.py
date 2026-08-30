@@ -3,21 +3,24 @@
 `Behaviour.tags` carries this module's own "key:value" history convention
 (see `agents/economist.py`'s module docstring for why no dedicated
 history store exists yet): `"green_streak:N"`, `"repairs:N"`,
-`"duration_ms:N"`, `"asserts:<fingerprint>"`, and the bare `"sentinel"`
-marker.
+`"duration_ms:N"`, `"asserts:<fingerprint>"`. Provenance (fix round 1) is
+NOT one of these -- `Behaviour.source` is its own durable field, set once
+at creation, precisely so a caller reconstructing `tags` wholesale can
+never accidentally un-protect a Sentinel-written behaviour.
 """
 
 import pytest
 
 from agents.economist import Economist
-from app.models import Behaviour, Incident, Route
+from app.models import Behaviour, Incident, Route, Workspace
+from gateway.gateway import GatewayError
 from gateway.policy import SCOPES
 from tests.agent_fixtures import make_ctx
 
 
-def _behaviour(id, route, spec_path, tags=(), status="active"):
+def _behaviour(id, route, spec_path, tags=(), status="active", source="author"):
     return Behaviour(id=id, workspace_id="ws1", text=f"covers {route}", route=route,
-                      spec_path=spec_path, tags=tags, status=status)
+                      spec_path=spec_path, tags=tags, status=status, source=source)
 
 
 def _ctx(behaviours, routes=(), incidents=()):
@@ -70,7 +73,20 @@ def ctx_any():
 def ctx_sentinel_behaviour():
     return _ctx(
         [_behaviour("b1", "/checkout/submit", "specs/sentinel-checkout.spec.ts",
-                     tags=("green_streak:99", "sentinel", "incident"))],
+                     tags=("green_streak:99", "incident"), source="sentinel")],
+        routes=[Route(id="rt1", workspace_id="ws1", path="/checkout/submit", coverage_pct=15)],
+    )
+
+
+@pytest.fixture
+def ctx_sentinel_behaviour_with_rewritten_tags():
+    # Fix round 1: `tags` wholly reconstructed (as this module's own
+    # history convention -- Healer/Runner appending green_streak/repairs --
+    # legitimately would), carrying no "sentinel" string at all. Protection
+    # must survive because it lives on `source`, not `tags`.
+    return _ctx(
+        [_behaviour("b1", "/checkout/submit", "specs/sentinel-checkout.spec.ts",
+                     tags=("green_streak:99",), source="sentinel")],
         routes=[Route(id="rt1", workspace_id="ws1", path="/checkout/submit", coverage_pct=15)],
     )
 
@@ -130,6 +146,16 @@ def test_it_never_recommends_removing_a_sentinel_written_behaviour(ctx_sentinel_
     assert out.data["recommendations"] == []
 
 
+def test_protection_survives_a_wholesale_tags_rewrite(ctx_sentinel_behaviour_with_rewritten_tags):
+    # Fix round 1: provenance lives on `source`, not on a "sentinel" string
+    # inside `tags` -- a behaviour whose `tags` were entirely reconstructed
+    # (carrying no such string at all) must still be protected.
+    behaviour = ctx_sentinel_behaviour_with_rewritten_tags.repo.behaviours_for_workspace("ws1")[0]
+    assert "sentinel" not in behaviour.tags and behaviour.source == "sentinel"
+    out = Economist().run(ctx_sentinel_behaviour_with_rewritten_tags)
+    assert out.data["recommendations"] == []
+
+
 def test_a_slow_behaviour_that_covers_a_lot_is_not_flagged(ctx_slow_but_valuable):
     out = Economist().run(ctx_slow_but_valuable)
     assert not any(r["spec_path"] == "specs/checkout-flow.spec.ts" for r in out.data["recommendations"])
@@ -160,3 +186,11 @@ def test_economist_never_calls_a_write_tool_even_if_offered_one(ctx_flaky_histor
     # agent and confirm nothing was ever written to the repo as a result.
     Economist().run(ctx_flaky_history)
     assert ctx_flaky_history.repo.behaviours_for_workspace("ws1")[0].status == "active"
+
+
+def test_a_denied_read_surfaces_as_an_error_not_a_silent_skip(ctx_any):
+    ctx_any.repo.put_workspace(Workspace(
+        id="ws1", name="Acme", repo="acme/storefront",
+        gate_rules=({"tool": "graph.read", "pattern": "*", "effect": "deny"},)))
+    with pytest.raises(GatewayError):
+        Economist().run(ctx_any)

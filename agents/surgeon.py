@@ -18,12 +18,43 @@ way every other agent in this fleet treats one (see
 module only ever silences the one error shape the brief names as a normal
 outcome, never blocks in general.
 
-**Never edits a `.spec.ts` file.** A patch that "fixes" a failing spec by
-editing the spec itself is the single worst thing this product could ship --
-it would hide the very bug a customer is paying to find, permanently, with
-a green checkmark on top. `_blast_radius` rejects a proposed diff that
-touches any `.spec.ts` path OUTRIGHT, before verification ever runs, and
-before a single gateway call is made -- no write, no PR, nothing persisted.
+**Never destroys a spec, and never trusts a suffix to know one when it
+sees one.** Fix round 1: the first cut of this guard only ever looked at
+`+++ b/<path>` lines (a diff's post-image side) and only ever recognised
+`.spec.ts` by name. A reviewer demonstrated both holes with one diff: a
+patch that fixes an unrelated source file while ALSO deleting
+`specs/checkout.spec.ts` (`--- a/specs/checkout.spec.ts` / `+++
+/dev/null`) never mentions the spec on its `+++ b/` side at all -- the old
+guard saw nothing wrong, verified the (now permanently un-tested) "fix",
+and opened a real PR. A rename to `specs/checkout.spec.ts.bak` evaded the
+same way, and a spec named `checkout.spec.js`/`.test.ts` was never even
+suffix-matched. Deleting a regression test is WORSE than editing one --
+editing tampers with it, deleting removes it forever, and the suite then
+passes honestly, with the bug still live.
+
+Two independent fixes, both required (see `_all_touched_paths`/`_blast_
+radius_violation`):
+
+1. **Both sides of every file header are parsed**, not just `+++ b/`: `---
+   a/<path>` (the pre-image), `+++ b/<path>` (the post-image), and git's
+   own `rename from`/`rename to` header pair. `/dev/null` on either side
+   means "this path is being created/destroyed", not "this path doesn't
+   count" -- a path that appears ANYWHERE in the diff, on either side, is
+   in scope for the guard below. This is what makes a deletion or a
+   rename-away visible at all: the spec's OLD path still appears on the
+   `--- a/` side even though no `+++ b/` line ever names it again.
+2. **Identity beats suffix.** `_blast_radius_violation` checks every
+   touched path against `ctx.repo.specs_for_workspace(...)` FIRST -- the
+   actual, authoritative set of files this workspace considers a spec,
+   whatever they are named -- and only falls back to a suffix check
+   (`.spec.ts`/`.spec.js`/`.test.ts`/`.test.js`, belt-and-braces) for a
+   path that is not yet a known spec at all (a brand-new spec file a
+   patch tries to smuggle in and immediately delete, say). Suffix-only
+   matching protected nothing against a `.spec.js` suite, a `.test.ts`
+   one, or a shared helper a spec `import`s; the identity check protects
+   the actual files this workspace already trusts as tests, by name, not
+   by guessing a naming convention.
+
 The same check also rejects a diff naming a path outside the repo at all
 (a leading `/`, or a `..` segment) -- the judgement call this task's brief
 calls out explicitly ("a finding whose root cause names a file outside the
@@ -61,23 +92,37 @@ silently worked around, and flagged again in this task's report. A finding
 with no resolvable spec is treated as unverifiable and discarded the same
 way an ineffective patch is -- Surgeon never writes what it cannot prove.
 
+**The model is called from inside a gateway call, screened first.** Fix
+round 1: the original draft called `ctx.model.generate(...)` directly in
+`run()`, before any `ctx.gateway.call` existed to screen its `payload`
+through `check_input` -- unlike every other agent in this fleet (Author,
+Healer, Sentinel), which all wrap their own model call inside the `fn`
+passed to a gateway call specifically so site-derived text is screened
+BEFORE the model ever sees it, not re-examined after the fact. `run()` now
+drafts, blast-radius-checks, verifies, and persists all inside ONE
+`repo.write:src` call (see below) -- `payload` (the Finding's own `title`/
+`route`, both ultimately built from a live page's error text) is screened
+by `check_input` before that call's `fn` -- and therefore the model call
+inside it -- ever runs.
+
 Three gateway calls when a patch verifies, none of them looped:
 
-1. `repo.write:src` -- persists the verified `Patch` row. One call, whole
-   patch (every file the diff touches), not one call per file.
-2. `pr.open` -- opens the PR and stamps its URL onto the same `Patch` row.
-3. `pr.merge` -- attempted every time a patch verifies (never skipped just
-   because SOME workspace, somewhere, gates SOME path -- `decide()` is what
-   knows whether THIS target is gated, not this module). This is the one
-   call that can raise the human-gate `GatewayError` described above.
-
-Site-derived text -- the Finding's own `title` (Triager's root-cause
-summary, itself built from a live page's error text and trace) and `route`
--- is screened through `payload` before the model is ever asked to draft
-the diff, the same fleet-wide rule every other agent in this codebase
-follows: the attacker here is not our customer, who never sees this prompt
-before Surgeon does; it is the site under test, whose error strings and
-DOM content this module interpolates directly.
+1. `repo.write:src` -- drafts the diff (the model call lives here, behind
+   `payload` screening), blast-radius-checks it, verifies it, and persists
+   the `Patch` row, all as one call. `target` is `finding.route or
+   finding.id` -- the file(s) a patch will touch are not known until AFTER
+   the model has drafted something INSIDE this call, so they cannot also
+   be this call's OWN gate target; a workspace that wants to gate on the
+   actual touched path does so on `pr.merge` below, which runs after the
+   real files are known and uses exactly that as its target.
+2. `pr.open` -- opens the PR (only reached if drafting/verification
+   succeeded) and stamps its URL onto the same `Patch` row. `target` is
+   the real, comma-joined touched-file list.
+3. `pr.merge` -- attempted every time a patch verifies, with the same
+   real file-path target as `pr.open` -- so THIS is the call a workspace's
+   own gate rules (payment/billing path patterns) actually fire against.
+   This is the one call that can raise the human-gate `GatewayError`
+   described above.
 """
 
 import re
@@ -89,31 +134,87 @@ from gateway.gateway import GatewayError
 
 DEFAULT_ATTEMPTS = 3
 
-# A unified diff's own file-path convention: "+++ b/<path>" names the file
-# as it exists AFTER the patch (the one this module cares about -- a
-# renamed-away-from path, "--- a/<old>", is not a file Surgeon is asking to
-# write to). `re.M` so this matches once per line in a multi-file diff,
-# not just at the start of the whole string.
-_DIFF_FILE = re.compile(r"^\+\+\+ b/(.+)$", re.M)
+# Both sides of a unified diff's own file-path convention, plus git's
+# rename headers -- see the module docstring's fix-round-1 note for why
+# BOTH sides (not just "+++ b/") have to be parsed, and why a git-style
+# rename (which may carry no "---"/"+++" hunk at all when content is
+# otherwise unchanged) needs its own pair of patterns.
+_OLD_PATH = re.compile(r"^--- (\S.*)$", re.M)
+_NEW_PATH = re.compile(r"^\+\+\+ (\S.*)$", re.M)
+_RENAME_FROM = re.compile(r"^rename from (\S.*)$", re.M)
+_RENAME_TO = re.compile(r"^rename to (\S.*)$", re.M)
+
+# Suffix is belt-and-braces ONLY -- see `_blast_radius_violation`. The
+# actual guard is identity against `ctx.repo.specs_for_workspace(...)`.
+_SPEC_SUFFIXES = (".spec.ts", ".spec.js", ".spec.tsx", ".spec.jsx",
+                   ".test.ts", ".test.js", ".test.tsx", ".test.jsx")
 
 
 def _patch_id(finding_id: str) -> str:
     return f"patch_{finding_id}"
 
 
-def _files_in_diff(diff: str) -> list[str]:
-    return sorted(set(_DIFF_FILE.findall(diff)))
+def _clean_path(raw: str) -> str | None:
+    """A diff-header path, stripped and `a/`/`b/`-unprefixed -- or `None`
+    for `/dev/null`, the diff format's own way of saying "this side of the
+    pair does not exist" (a pure creation has no `--- a/<path>`; a pure
+    deletion has no `+++ b/<path>`)."""
+    path = raw.strip()
+    if path == "/dev/null":
+        return None
+    if path[:2] in ("a/", "b/"):
+        path = path[2:]
+    return path
 
 
-def _blast_radius_violation(files: list[str]) -> str | None:
-    """`None` when every file the diff touches is a legitimate patch
-    target; otherwise the reason it is not, for the caller to report
-    verbatim rather than inventing its own wording twice."""
-    if not files:
+def _all_touched_paths(diff: str) -> set[str]:
+    """Every path this diff mentions on EITHER side of a file header, or a
+    git rename -- a deletion's old path, a creation's new path, a
+    modification's (identical) old-and-new path, and a rename's both
+    paths, all land here. This is deliberately broader than "the files
+    this patch will end up writing to" (`_new_paths`, used only once a
+    diff has already cleared this check) -- the whole point is to see a
+    file that is being DESTROYED, which never appears on the `+++ b/`
+    side at all."""
+    paths = {p for raw in _OLD_PATH.findall(diff) if (p := _clean_path(raw)) is not None}
+    paths |= {p for raw in _NEW_PATH.findall(diff) if (p := _clean_path(raw)) is not None}
+    paths |= {p for raw in _RENAME_FROM.findall(diff) if (p := _clean_path(raw)) is not None}
+    paths |= {p for raw in _RENAME_TO.findall(diff) if (p := _clean_path(raw)) is not None}
+    return paths
+
+
+def _new_paths(diff: str) -> list[str]:
+    """The paths this diff actually WRITES to (its post-image side, plus
+    `rename to`), sorted and de-duplicated -- what `Patch.files` and the
+    `pr.open`/`pr.merge` target are built from once a diff has already
+    cleared `_blast_radius_violation`. A pure deletion contributes nothing
+    here (there is no post-image to write) even though its old path is
+    still very much a member of `_all_touched_paths`."""
+    paths = {p for raw in _NEW_PATH.findall(diff) if (p := _clean_path(raw)) is not None}
+    paths |= {p for raw in _RENAME_TO.findall(diff) if (p := _clean_path(raw)) is not None}
+    return sorted(paths)
+
+
+def _blast_radius_violation(all_paths: set[str], known_specs: set[str]) -> str | None:
+    """`None` when every file the diff touches -- on EITHER side of a
+    header -- is a legitimate patch target; otherwise the reason it is
+    not, for the caller to report verbatim rather than inventing its own
+    wording twice.
+
+    Identity first, suffix second (see the module docstring): a path
+    already tracked as a spec in THIS workspace is rejected outright
+    regardless of what it is named; a path not yet tracked but shaped like
+    one (`.spec.ts`, `.spec.js`, `.test.ts`, `.test.js`) is rejected too --
+    a model should never be inventing new test files inside a source
+    patch, whatever it names them.
+    """
+    if not all_paths:
         return "the proposed diff named no file to patch"
-    for f in files:
-        if f.endswith(".spec.ts"):
-            return f"the proposed diff edits the spec file {f!r} -- refusing outright"
+    for f in sorted(all_paths):
+        if f in known_specs:
+            return f"the proposed diff touches {f!r}, a known spec file in this workspace -- refusing outright"
+        if f.endswith(_SPEC_SUFFIXES):
+            return f"the proposed diff touches {f!r}, which is shaped like a spec/test file -- refusing outright"
         if f.startswith("/") or ".." in f.split("/"):
             return f"the proposed diff names {f!r}, outside this repository"
     return None
@@ -174,55 +275,56 @@ class Surgeon:
         finding = findings[0]
 
         spec_path = _spec_for_finding(ctx, finding)
+        known_specs = set(ctx.repo.specs_for_workspace(ctx.workspace_id))
 
-        payload = {"title": finding.title, "route": finding.route}
-        diff = ctx.model.generate(_prompt(finding, spec_path or "(unresolved spec)"))
-        # check_input screens `payload` for a prompt-injection attempt only
-        # when a gateway call actually carries one -- the model call above
-        # necessarily happens before any gateway call exists to screen it
-        # through (there is no tool call yet at the point the diff is
-        # drafted), so this module screens the SAME site-derived text a
-        # second, explicit way: rejecting a diff outright is cheap, but the
-        # fleet-wide guarantee is "site text never reaches a model
-        # unscreened" -- guarded here via the write call below, which is
-        # the first point this run ever touches the gateway, exactly the
-        # way `agents/healer.py` defers its own payload screen to its
-        # first gated call rather than a call that doesn't exist yet.
+        def draft_and_persist():
+            # The model call lives HERE, inside `fn`, so the `payload`
+            # below (the site-derived Finding text) is screened by
+            # `check_input` before this line ever runs -- see the module
+            # docstring's fix-round-1 note.
+            diff = ctx.model.generate(_prompt(finding, spec_path or "(unresolved spec)"))
 
-        files = _files_in_diff(diff)
-        violation = _blast_radius_violation(files)
-        if violation:
-            return AgentResult(
-                summary="Patch rejected before verification",
-                detail=f"Refusing to write: {violation}.",
-                outcome="failed",
-                data={**empty_data, "diff": diff, "files": files},
-            )
+            all_paths = _all_touched_paths(diff)
+            violation = _blast_radius_violation(all_paths, known_specs)
+            if violation:
+                return {"status": "violation", "diff": diff, "files": _new_paths(diff), "reason": violation}
 
-        verified = spec_path is not None and _verify(ctx, spec_path, self.attempts)
-        if not verified:
-            ctx.repo.put_finding(type(finding)(**{**finding.__dict__, "status": "patch_failed"}))
-            return AgentResult(
-                summary="Patch discarded",
-                detail="Verification failed: the patch did not turn the failure green, "
-                       "or it broke another spec. The finding stays open for another attempt.",
-                outcome="failed",
-                data={**empty_data, "diff": diff, "files": files},
-            )
+            if spec_path is None or not _verify(ctx, spec_path, self.attempts):
+                ctx.repo.put_finding(type(finding)(**{**finding.__dict__, "status": "patch_failed"}))
+                return {"status": "verify_failed", "diff": diff, "files": _new_paths(diff)}
 
-        target = ", ".join(files)
-
-        def persist_patch():
+            files = _new_paths(diff)
             ctx.repo.put_patch(Patch(
                 id=_patch_id(finding.id), finding_id=finding.id, diff=diff,
                 files=tuple(files), added=diff.count("\n+"), removed=diff.count("\n-"),
                 verified=True,
             ))
+            return {"status": "ok", "diff": diff, "files": files}
 
-        ctx.gateway.call(
+        payload = {"title": finding.title, "route": finding.route}
+        result = ctx.gateway.call(
             ctx.workspace_id, self.name, "repo.write:src",
-            target=target, payload=payload, fn=persist_patch,
+            target=finding.route or finding.id, payload=payload, fn=draft_and_persist,
         )
+
+        if result["status"] == "violation":
+            return AgentResult(
+                summary="Patch rejected before verification",
+                detail=f"Refusing to write: {result['reason']}.",
+                outcome="failed",
+                data={**empty_data, "diff": result["diff"], "files": result["files"]},
+            )
+        if result["status"] == "verify_failed":
+            return AgentResult(
+                summary="Patch discarded",
+                detail="Verification failed: the patch did not turn the failure green, "
+                       "or it broke another spec. The finding stays open for another attempt.",
+                outcome="failed",
+                data={**empty_data, "diff": result["diff"], "files": result["files"]},
+            )
+
+        diff, files = result["diff"], result["files"]
+        target = ", ".join(files)
 
         def open_pr():
             url = f"https://github.com/example/repo/pull/{uuid.uuid4().hex[:8]}"

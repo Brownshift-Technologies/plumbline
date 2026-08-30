@@ -135,6 +135,20 @@ class Behaviour:
     tags: tuple[str, ...] = ()
     owner: str = ""
     status: str = "active"
+    # Fix round 1 (Economist, Task 12g): provenance as a durable, typed
+    # field, not a string riding along in `tags`. `tags` is documented
+    # (and used elsewhere in this fleet -- Economist's own
+    # green_streak/repairs/duration_ms/asserts convention) as free-form and
+    # rewritable wholesale; a caller that reconstructs the tuple instead of
+    # appending to it silently drops anything encoded there, "sentinel"
+    # included. `source` cannot be lost that way -- it is set once, at
+    # creation, by whichever agent actually wrote this behaviour, and nothing
+    # about editing `tags` later can touch it. `"author"` is the default
+    # because that is the fleet's default writer (`agents/author.py`);
+    # `agents/sentinel.py` sets `"sentinel"` explicitly for every behaviour
+    # it derives from a real production incident, which is the one signal
+    # `agents/economist.py` must never lose track of.
+    source: str = "author"
 
 
 @dataclass(frozen=True)
