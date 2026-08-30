@@ -27,21 +27,54 @@ skip, never as a reason to fail closed on every call an agent makes that
 day -- see `_is_well_formed`. A well-formed rule that simply doesn't match
 the current call is not an error at all; it just doesn't apply.
 
-Matching: a pattern is an ordinary `fnmatch` glob against `target`, except
-a pattern starting with "!" inverts to an *allow-list*: the rest is a
-comma-separated list of glob patterns, and the whole thing matches when
-`target` matches none of them. This is what lets one data-driven rule
-express "anything but staging" for `env.write` -- an owner can configure
-exactly which environment names Chaos may reach -- without a hardcoded,
-unbounded blacklist of every possible production name.
+Matching: a rule carries exactly one of two match forms.
+- `"pattern": str` -- an ordinary `fnmatch` glob; the rule fires when
+  `target` matches it. This is a review round after the first cut of this
+  module used a `"!a,b,c"`-prefixed string to mean "anything but a,b,c",
+  overloading `pattern`'s own sigil space -- a pattern that legitimately
+  started with `!` had no escape and would silently mismatch rather than
+  error. `allow_only` below replaces that DSL entirely: `pattern` is now
+  always a plain, literal glob, `!` included.
+- `"allow_only": list[str]` -- the rule fires when `target` matches NONE of
+  the listed globs. This is what lets one data-driven rule express
+  "anything but staging" for `env.write` -- an owner can configure exactly
+  which environment names Chaos may reach -- without an unbounded blacklist
+  of every possible production name, and without a string micro-syntax that
+  needs its own parser. It is also a structured field `PUT /api/policy/rules`
+  can validate and a settings UI can render as a real list control, where the
+  string form would need a bespoke round-trip that could re-serialise wrong
+  on every edit.
 
-`target` is normalised with `posixpath.normpath` (pure string manipulation,
-no filesystem I/O) before matching. Without that, a target like
-`"src/catalog/../checkout/payment-client.ts"` -- which *is* the
-payments file -- would read as `src/catalog/*` to a naive string match and
-slip straight past a `src/checkout/*` human gate. Normalising first closes
-that off: the pattern is matched against where the target actually
-resolves, not against whatever string an agent (or a bug) happened to send.
+`target` is assumed to be a forward-slash path the way a git diff reports
+one (`decide()`'s only caller today, Task 5's Gateway, extracts it from PR
+diffs and environment names -- neither of which is ever a Windows path in
+this product's own pipeline). Call sites are still free to hand it anything,
+so `target` is normalised before matching: backslashes become forward
+slashes first, then `posixpath.normpath` collapses `.`/`..` segments (both
+pure string manipulation, no filesystem I/O). Without the slash swap,
+`"src\\checkout\\payment-client.ts"` -- the same file, spelled the way a
+Windows-style caller might -- would read as an unrelated opaque string to a
+`src/checkout/*` glob and evade the gate; without the traversal collapse,
+`"src/catalog/../checkout/payment-client.ts"` -- which *is* the payments
+file -- would read as `src/catalog/*` and slip past the same gate.
+
+A gated tool with no usable target fails CLOSED, not open. A tool is
+"gated" here if the active rule set has at least one well-formed rule
+naming it -- so `rules=[]` ("this workspace configured no gates") also
+means no tool is gated, and an empty target is fine, consistently with the
+"empty rules is not the same as no rules" split above. But a rule set that
+DOES have an opinion about a tool must not silently allow a call that gives
+it nothing to evaluate: if none of that tool's rules can even be checked
+because `target` is blank, that is exactly the situation a human gate
+exists for, so the call returns `needs_human=True` rather than falling
+through to the scope-only allow. This closes the gap a reviewer found in
+the first cut: `decide("surgeon", "pr.merge")` with no target matched none
+of the payments-path patterns (an empty string matches no literal path
+glob) and returned a bare allow -- so any bug or omission upstream that
+dropped the target off a payments merge would have sailed it through
+completely ungated. Task 5's Gateway independently rejects a gated call
+whose target is empty or whitespace too; neither layer is allowed to rely
+on the other one catching it.
 
 Conflicts: when more than one rule matches the same call, the *strictest*
 effect wins -- deny beats human beats allow -- regardless of which rule
@@ -72,10 +105,11 @@ DEFAULT_RULES: list[dict] = [
     {"tool": "pr.merge", "pattern": "src/checkout/payment*", "effect": "human"},
     {"tool": "pr.merge", "pattern": "src/billing/*", "effect": "human"},
     {"tool": "pr.merge", "pattern": "*/payments/*", "effect": "human"},
-    # "!allow-list,of,patterns" -- see the matching note in the module
-    # docstring. Chaos may only reach environments matching one of these;
-    # anything else for env.write is denied.
-    {"tool": "env.write", "pattern": "!staging,staging-*,preview-*", "effect": "deny"},
+    # Chaos may only reach environments matching one of these; anything
+    # else for env.write is denied. See "allow_only" in the module
+    # docstring -- this replaced a "!staging,staging-*,preview-*" string
+    # DSL that had no escape for a pattern starting with a literal "!".
+    {"tool": "env.write", "allow_only": ["staging", "staging-*", "preview-*"], "effect": "deny"},
 ]
 
 _VALID_EFFECTS = frozenset({"human", "deny", "allow"})
@@ -93,26 +127,36 @@ class Decision:
 
 
 def _is_well_formed(rule: object) -> bool:
-    """A rule this module can act on: a dict with a str tool, str pattern,
-    and a recognised effect. Anything else -- a stray `None`, a string, a
-    dict missing a key, an effect that isn't one of the three words this
-    module understands -- is tenant data this module cannot interpret, so
-    it's skipped rather than raised on. One bad row must not take down
-    every agent in the workspace.
+    """A rule this module can act on: a dict with a str tool, a recognised
+    effect, and exactly one match form -- a str `pattern` xor a non-empty
+    `allow_only` list of str globs. Anything else -- a stray `None`, a
+    string, a dict missing a key, both match forms at once, an effect that
+    isn't one of the three words this module understands -- is tenant data
+    this module cannot interpret, so it's skipped rather than raised on.
+    One bad row must not take down every agent in the workspace.
     """
-    return (
-        isinstance(rule, dict)
-        and isinstance(rule.get("tool"), str)
-        and isinstance(rule.get("pattern"), str)
-        and rule.get("effect") in _VALID_EFFECTS
+    if not (isinstance(rule, dict) and isinstance(rule.get("tool"), str)
+            and rule.get("effect") in _VALID_EFFECTS):
+        return False
+    has_pattern = isinstance(rule.get("pattern"), str)
+    allow_only = rule.get("allow_only")
+    has_allow_only = (
+        isinstance(allow_only, list) and len(allow_only) > 0
+        and all(isinstance(p, str) for p in allow_only)
     )
+    return has_pattern != has_allow_only  # exactly one, not both, not neither
 
 
-def _pattern_matches(pattern: str, target: str) -> bool:
-    if pattern.startswith("!"):
-        allowed = [p for p in pattern[1:].split(",") if p]
-        return not any(fnmatch.fnmatchcase(target, p) for p in allowed)
-    return fnmatch.fnmatchcase(target, pattern)
+def _rule_matches(rule: dict, target: str) -> bool:
+    if "pattern" in rule:
+        return fnmatch.fnmatchcase(target, rule["pattern"])
+    return not any(fnmatch.fnmatchcase(target, p) for p in rule["allow_only"])
+
+
+def _normalise(target: str) -> str:
+    if not target:
+        return target
+    return posixpath.normpath(target.replace("\\", "/"))
 
 
 def decide(
@@ -131,25 +175,25 @@ def decide(
     # configured no gates") are deliberately different states -- collapsing
     # them with a falsy check is the bug this line exists to prevent.
     active_rules = DEFAULT_RULES if rules is None else rules
-    norm_target = posixpath.normpath(target) if target else target
+    norm_target = _normalise(target)
 
     strictest: dict | None = None
+    tool_is_gated = False
     for rule in active_rules:
-        if not _is_well_formed(rule):
+        if not _is_well_formed(rule) or rule["tool"] != tool:
             continue
-        if rule["tool"] != tool:
-            continue
-        if not _pattern_matches(rule["pattern"], norm_target):
+        tool_is_gated = True
+        if not _rule_matches(rule, norm_target):
             continue
         if strictest is None or _EFFECT_PRIORITY[rule["effect"]] > _EFFECT_PRIORITY[strictest["effect"]]:
             strictest = rule
 
-    if strictest is None or strictest["effect"] == "allow":
+    if strictest is None:
+        if tool_is_gated and not norm_target.strip():
+            return Decision(False, f"{tool!r} is gated and no target was given", needs_human=True)
+        return Decision(True, "within scope")
+    if strictest["effect"] == "allow":
         return Decision(True, "within scope")
     if strictest["effect"] == "deny":
-        return Decision(False, f"{target!r} is denied by rule {strictest['pattern']!r} for {tool!r}")
-    return Decision(
-        False,
-        f"{target!r} matches human-gated rule {strictest['pattern']!r} for {tool!r}",
-        needs_human=True,
-    )
+        return Decision(False, f"{target!r} is denied by a rule for {tool!r}")
+    return Decision(False, f"{target!r} matches a human-gated rule for {tool!r}", needs_human=True)

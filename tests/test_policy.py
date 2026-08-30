@@ -164,3 +164,71 @@ def test_thousands_of_rules_still_finds_the_one_that_matches():
     rules = noise + [{"tool": "pr.merge", "pattern": "src/checkout/*", "effect": "deny"}]
     d = decide("surgeon", "pr.merge", "src/checkout/payment-client.ts", rules=rules)
     assert d.allowed is False and d.needs_human is False
+
+
+# --- fix round: Rulings 24-26 from the Task 4 review ------------------------
+
+
+def test_allow_only_expresses_an_allow_list_as_structured_data():
+    """Ruling 24: `allow_only` replaces the old `"!a,b,c"` string DSL."""
+    rules = [{"tool": "env.write", "allow_only": ["staging", "staging-*"], "effect": "deny"}]
+    assert decide("chaos", "env.write", "staging", rules=rules).allowed is True
+    assert decide("chaos", "env.write", "prod-eu-west-1", rules=rules).allowed is False
+
+
+def test_a_pattern_literally_starting_with_bang_is_now_just_a_literal_glob():
+    """The bug Ruling 24 exists to close: with `allow_only` as its own field,
+    `pattern` never needs a sigil, so a pattern that happens to start with
+    "!" is matched literally instead of silently mismatching everything."""
+    rules = [{"tool": "env.write", "pattern": "!staging", "effect": "deny"}]
+    assert decide("chaos", "env.write", "!staging", rules=rules).allowed is False
+    assert decide("chaos", "env.write", "staging", rules=rules).allowed is True
+
+
+def test_a_rule_with_both_pattern_and_allow_only_is_malformed():
+    rules = [{"tool": "env.write", "pattern": "*", "allow_only": ["staging"], "effect": "deny"}]
+    assert decide("chaos", "env.write", "prod-eu-west-1", rules=rules).allowed is True
+
+
+def test_a_rule_with_neither_pattern_nor_allow_only_is_malformed():
+    rules = [{"tool": "env.write", "effect": "deny"}]
+    assert decide("chaos", "env.write", "prod-eu-west-1", rules=rules).allowed is True
+
+
+def test_an_empty_allow_only_list_is_malformed_not_deny_everything():
+    rules = [{"tool": "env.write", "allow_only": [], "effect": "deny"}]
+    assert decide("chaos", "env.write", "prod-eu-west-1", rules=rules).allowed is True
+
+
+def test_a_gated_tool_with_no_target_fails_closed_to_human():
+    """Ruling 25: the review's Important-1 finding. `pr.merge` is gated by
+    DEFAULT_RULES; an empty target matches none of its path globs, and the
+    first cut of this module let that fall through to a bare allow -- a
+    payments merge whose target extraction failed upstream would have sailed
+    through completely ungated."""
+    d = decide("surgeon", "pr.merge")
+    assert d.allowed is False and d.needs_human is True
+
+
+def test_a_gated_tool_with_a_blank_target_also_fails_closed():
+    d = decide("surgeon", "pr.merge", "   ")
+    assert d.allowed is False and d.needs_human is True
+
+
+def test_an_ungated_tool_with_no_target_is_unaffected():
+    assert decide("cartographer", "browser.read").allowed is True
+
+
+def test_empty_rules_means_no_target_gate_either():
+    """`rules=[]` is "explicitly configured no gates" -- that has to cover
+    the fail-closed-on-no-target behaviour too, or an empty rule list would
+    not actually mean what Task 4's own test says it means."""
+    assert decide("surgeon", "pr.merge", rules=[]).allowed is True
+
+
+def test_backslash_separated_target_is_normalized_like_a_forward_slash_one():
+    """Ruling 26. A target spelled with backslashes must trip the same gate
+    as its forward-slash form, not evade it by looking like an opaque,
+    unrecognised string to a "src/checkout/*" glob."""
+    d = decide("surgeon", "pr.merge", "src\\checkout\\payment-client.ts")
+    assert d.allowed is False and d.needs_human is True
