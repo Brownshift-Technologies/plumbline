@@ -27,8 +27,11 @@ import uuid
 
 from fastapi import FastAPI
 
+from app.account_routes import router as account_router
 from app.auth_routes import router as auth_router
 from app.models import User, Workspace
+from app.oauth_routes import router as oauth_router
+from app.providers import GitHubProvider, GoogleProvider, OktaProvider
 from app.repo import Repo
 from app.sessions import SessionService
 from app.settings import PlumblineConfig, load_settings
@@ -36,6 +39,15 @@ from core.telemetry import log_event
 from core.web import create_app
 from gateway.gateway import Gateway
 from gateway.ledger import Ledger
+
+# Insecure by design, loud about it, and used only when OAUTH_STATE_SECRET
+# is unset -- see app/settings.py's PlumblineConfig.oauth_state_secret
+# docstring for why this is a fixed fallback rather than a randomly
+# generated one: a random-per-process secret would make `start` and
+# `callback` disagree the moment they land on two different Cloud Run
+# instances, which is exactly the class of bug Task 8b exists to fix
+# (Task 6's per-process TOTP replay dict) rather than reintroduce elsewhere.
+_INSECURE_DEV_OAUTH_SECRET = "plumbline-dev-oauth-secret-DO-NOT-USE-IN-PRODUCTION"
 
 
 def _on_event(payload: dict) -> None:
@@ -114,6 +126,22 @@ def _seed_demo_if_missing_factory(config: PlumblineConfig, repo: Repo):
     return seed_demo_if_missing
 
 
+def _deliver_reset_email_default(email: str, token: str) -> None:
+    """Default `app.state.deliver_reset_email` -- see app/account_routes.py's
+    module docstring for the whole hook, and why one is needed at all: this
+    codebase has no email/SMS provider wired up yet (out of scope for this
+    task), so the only thing a real deployment can do today is make the
+    token's issuance observable in Cloud Logging for an operator, exactly
+    the same "log it, don't fake it" stance `_seed_demo_if_missing_factory`
+    takes toward its own Task 15 forward dependency above. The raw token
+    itself is deliberately NOT included in the log line -- logging it would
+    make Cloud Logging (durable, exportable, read by more people than the
+    one intended recipient) an alternate way to obtain a working reset
+    link, defeating the entire point of hashing it at rest.
+    """
+    log_event("auth.password_reset_issued", severity="INFO", email_domain=email.rsplit("@", 1)[-1])
+
+
 def build_app(config: PlumblineConfig | None = None, repo: Repo | None = None) -> FastAPI:
     """Construct one fully-wired Plumbline `FastAPI` app.
 
@@ -137,8 +165,21 @@ def build_app(config: PlumblineConfig | None = None, repo: Repo | None = None) -
     app.state.gateway = Gateway(rp, app.state.ledger)
     app.state.bootstrap_workspace = _bootstrap_workspace
     app.state.seed_demo_if_missing = _seed_demo_if_missing_factory(cfg, rp)
+    app.state.oauth_state_secret = cfg.oauth_state_secret or _INSECURE_DEV_OAUTH_SECRET
+    # dict, not a fixed tuple of providers, so tests can add a "fake" entry
+    # (`app.state.oauth_providers["fake"] = FakeProvider(...)`) without
+    # this module ever importing the test double it has no business
+    # knowing about.
+    app.state.oauth_providers = {
+        "google": GoogleProvider(cfg),
+        "github": GitHubProvider(cfg),
+        "okta": OktaProvider(cfg),
+    }
+    app.state.deliver_reset_email = _deliver_reset_email_default
 
     app.include_router(auth_router)
+    app.include_router(oauth_router)
+    app.include_router(account_router)
 
     @app.get("/_health")
     def _health():

@@ -5,10 +5,13 @@ every write flattens a dataclass to a dict via `models.to_dict` before
 handing it to Store. Callers never see a raw Firestore dict.
 """
 
+import time
+
 from app.models import (
     Behaviour,
     Finding,
     Membership,
+    PasswordReset,
     Patch,
     Route,
     Run,
@@ -85,6 +88,50 @@ class Repo:
             return True
 
         return _claim(self._store.transaction())
+
+    def consume_totp_step(self, user_id: str, step: int) -> bool:
+        """RFC 6238's own replay mitigation, made to survive horizontal
+        scaling (Task 8b). Atomically accepts `step` as the new
+        `last_used_totp_step` for `user_id` and returns True, UNLESS `step`
+        is `<=` the value already recorded, in which case it changes
+        nothing and returns False.
+
+        A legitimate user never needs to redeem an older or equal step than
+        one already used -- time only moves forward -- so this closes the
+        replay window completely, not just "for however long this process's
+        memory happens to remember it" the way `app.security.verify_totp`'s
+        in-process dict does. It has to be transactional, not a plain
+        read-then-write, for the same reason `claim_email` above and
+        `gateway/ledger.py`'s `append` are: two concurrent requests
+        presenting the same captured code would both read the old step
+        before either writes the new one, and both would be accepted. The
+        `@firestore.transactional` retry loop is what makes exactly one of
+        them win.
+
+        Reads and writes the *whole* user document (not a partial update)
+        inside the transaction -- `core/fakes.py`'s `FakeTransaction` only
+        implements `set()`, matching the whole-document-replace pattern
+        every other transactional write in this codebase already uses
+        (`claim_email`, `gateway/ledger.py`'s `append`), so the real client
+        and the test fake behave identically here.
+        """
+        from google.cloud import firestore
+
+        ref = self._store.doc("users", user_id)
+
+        @firestore.transactional
+        def _consume(transaction) -> bool:
+            snapshot = ref.get(transaction=transaction)
+            if not snapshot.exists:
+                return False
+            data = snapshot.to_dict()
+            if step <= data.get("last_used_totp_step", 0):
+                return False
+            data["last_used_totp_step"] = step
+            transaction.set(ref, data)
+            return True
+
+        return _consume(self._store.transaction())
 
     def user(self, uid: str) -> User | None:
         return _rebuild(User, self._store.get("users", uid))
@@ -186,3 +233,39 @@ class Repo:
             sid,
             {"id": sid, "user_id": "", "workspace_id": "", "expires_at": 0.0},
         )
+
+    # password resets ------------------------------------------------------
+    def put_password_reset(self, r: PasswordReset) -> None:
+        self._store.put("password_resets", r.id, to_dict(r))
+
+    def consume_password_reset(self, token_hash: str) -> PasswordReset | None:
+        """Atomically read-and-mark-used the reset row keyed by
+        `token_hash`. Returns the row as it stood the moment it was
+        consumed (so the caller still has `user_id`) if it existed, was not
+        already used, and had not yet expired -- otherwise `None`, covering
+        an unknown token, a second use of a spent one, and an expired one
+        in a single check.
+
+        Transactional for the same reason `consume_totp_step` above is: two
+        concurrent submissions of one captured reset link (an attacker
+        racing the legitimate user, or a client double-submitting a form)
+        must not both succeed. A plain get-then-set would let both read
+        `used=False` before either writes `used=True`.
+        """
+        from google.cloud import firestore
+
+        ref = self._store.doc("password_resets", token_hash)
+
+        @firestore.transactional
+        def _consume(transaction) -> PasswordReset | None:
+            snapshot = ref.get(transaction=transaction)
+            if not snapshot.exists:
+                return None
+            data = snapshot.to_dict()
+            if data.get("used") or data.get("expires_at", 0) <= time.time():
+                return None
+            result = PasswordReset(**data)
+            transaction.set(ref, {**data, "used": True})
+            return result
+
+        return _consume(self._store.transaction())

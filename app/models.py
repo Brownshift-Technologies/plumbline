@@ -18,7 +18,29 @@ class User:
     email: str
     password_hash: str
     name: str
+    # `totp_secret` is the CONFIRMED, usable secret -- the one every
+    # approval-gate check (Task 14b) reads, and the one `_member` in
+    # `tests/conftest.py` sets directly to mean "this fixture user has 2FA
+    # enabled". `totp_pending_secret` is where `POST /api/auth/totp/enrol`
+    # (Task 8b) stores a freshly generated secret before it has been proven
+    # -- an attacker who can reach `enrol` (e.g. via a stolen session with
+    # no second factor of its own) must not thereby gain a usable secret,
+    # so enrol never touches `totp_secret`. Only `POST /api/auth/totp/verify`,
+    # after checking a current code against the *pending* secret, promotes
+    # it into `totp_secret` and clears this field. Enrolling a second time
+    # while already confirmed only ever overwrites the pending slot, never
+    # the confirmed one -- see tests/test_totp.py's overwrite-attack tests.
     totp_secret: str | None = None
+    totp_pending_secret: str | None = None
+    # RFC 6238's own replay mitigation: the highest TOTP step (30s counter)
+    # ever successfully redeemed for this user, checked transactionally by
+    # `Repo.consume_totp_step` before a code is accepted anywhere (sign-in
+    # gate checks, `totp/verify`, `DELETE /api/auth/totp`). A per-process
+    # dict (as `app/security.py`'s `verify_totp` still is, deliberately, for
+    # Task 6/7's own tests) is invisible to a sibling Cloud Run instance; a
+    # field on the document already read/written for that user is not --
+    # see `Repo.consume_totp_step`'s docstring for the transactional detail.
+    last_used_totp_step: int = 0
     created_at: float = field(default_factory=time.time)
 
 
@@ -59,6 +81,21 @@ class Session:
     user_agent: str = ""
     ip_city: str = ""
     is_demo: bool = False
+
+
+@dataclass(frozen=True)
+class PasswordReset:
+    # `id` is the SHA-256 hash of the raw token, never the raw token itself
+    # -- a leaked `password_resets` collection (a Firestore export, a
+    # misconfigured rule, a compromised backup) must not hand an attacker a
+    # working reset link for every user in it. `Repo.consume_password_reset`
+    # looks this row up by re-hashing whatever the caller presents, exactly
+    # like a session id would if this codebase stored hashed session ids.
+    id: str
+    user_id: str
+    expires_at: float
+    used: bool = False
+    created_at: float = field(default_factory=time.time)
 
 
 @dataclass(frozen=True)

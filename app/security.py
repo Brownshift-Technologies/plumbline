@@ -7,6 +7,7 @@ library; the only cryptographic logic added here is TOTP replay tracking
 """
 
 import datetime
+import hashlib
 import secrets
 import time
 
@@ -105,6 +106,44 @@ def verify_totp(secret: str, code: str) -> bool:
             used.intersection_update(range(base_counter - 1, base_counter + 2))
             return True
     return False
+
+
+def totp_step_for(secret: str, code: str) -> int | None:
+    """Which RFC 6238 step (30s counter) `code` matches for `secret`, or
+    `None` if it matches none of them -- the same +/-1 step tolerance
+    `verify_totp` above checks, but stateless: no dict, no side effect, no
+    notion of "already used".
+
+    This exists for `app/repo.py`'s `Repo.consume_totp_step`, Task 8b's
+    replay defense. `verify_totp`'s own replay tracking (`_used_totp_counters`
+    above) is process-local and stays that way -- Task 6/7's tests pin its
+    exact behaviour and it remains correct for the single-process case it
+    was built for. It is simply not sufficient once a second Cloud Run
+    instance can see the same secret with its own, empty dict: a code
+    replayed against a different warm instance would sail through. The
+    fix is a persisted, transactional counter on the user document, and a
+    persisted counter needs the step number as a plain value it can compare
+    and store -- which is all this function computes.
+    """
+    totp = pyotp.TOTP(secret)
+    now = datetime.datetime.fromtimestamp(int(time.time()))
+    base_counter = totp.timecode(now)
+    for offset in (0, -1, 1):
+        if strings_equal(str(code), totp.at(now, offset)):
+            return base_counter + offset
+    return None
+
+
+def hash_token(token: str) -> str:
+    # SHA-256, not argon2: unlike a password, a token from `new_token()`
+    # already carries 256 bits of `secrets`-sourced entropy, so there is no
+    # low-entropy secret here for a slow, salted KDF to protect against
+    # offline brute force -- the point of hashing it at all is only so that
+    # reading the stored value back out (a leaked collection, a misdirected
+    # query) does not itself hand out a working token. A fast, unsalted
+    # digest is the right tool for that job and costs nothing on every
+    # reset-confirm request's lookup.
+    return hashlib.sha256(token.encode()).hexdigest()
 
 
 def new_token() -> str:

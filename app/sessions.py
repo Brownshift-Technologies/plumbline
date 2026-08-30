@@ -86,5 +86,15 @@ class SessionService:
             if s.id != keep_sid:
                 self.revoke(s.id)
 
+    def revoke_all(self, user_id: str) -> None:
+        # Unlike revoke_all_except, there is no session to spare -- a
+        # password reset (Task 8b) is what someone does when they believe
+        # every existing session might be an attacker's, including the one
+        # that just presented the reset link (that request carries no
+        # session cookie of its own at all: a reset is deliberately usable
+        # by someone who is signed out everywhere).
+        for s in self._repo.sessions_for_user(user_id):
+            self.revoke(s.id)
+
     def list_for_user(self, user_id: str) -> list[Session]:
         return [s for s in self._repo.sessions_for_user(user_id) if s.expires_at > time.time()]
