@@ -66,17 +66,39 @@ DEFAULT_SPEC_TIMEOUT_S = 30.0
 
 # Runner's own minimal "did this even parse" check, before a spec ever
 # reaches the browser at all -- point 5 of the brief: a spec that fails to
-# load is a `crash`, not a `failed` assertion. Deliberately the SAME two
-# checks `agents/author.py`'s `_is_valid` already uses to accept a spec in
-# the first place (`"test(" in text` and `"await" in text`) -- every spec
-# THIS platform's own Author writes already satisfies them by construction,
-# so this never false-positives on a spec this platform generated itself.
-# It is still a heuristic, not a parser: a legitimately-shaped but
-# differently-structured hand-written spec (no bare `test(...)` block, an
-# unusual `await`-free async pattern) could read as "won't load" when a
-# real Playwright collector would happily run it. See the task report.
+# load is a `crash`, not a `failed` assertion.
+#
+# Fix round 1: the original version required the bare substring `"test("`
+# AND `"await"`, copied from `agents/author.py`'s `_is_valid` -- which is
+# right for Author (it is validating output Author itself asked the model
+# to produce in exactly that shape) and wrong here. Runner's specs are not
+# only Author's output: Task 16's "Import -- bring existing Playwright" and
+# Task 14g's GitHub-repo import both make a hand-authored, real-world suite
+# a first-class input, and `test.only(...)`, `test.skip(...)`,
+# `test.todo(...)`, `test.describe(...)`, `test.each(...)`, and a
+# perfectly legal SYNCHRONOUS test body with no `await` at all are all
+# ordinary in one. The bare-substring version rejected every one of them --
+# silently: the spec never reached `run_spec` at all, so a customer
+# importing a real suite would lose coverage on every run with no error, no
+# failed count, and a still-green result. That is corrected below with (1)
+# a word-boundary regex over Playwright's actual call shape --
+# `test`, optionally followed by any number of `.word` modifiers, then `(`
+# -- so every legal `test*(` form matches, not just the bare call Author
+# happens to emit, and (2) dropping the `await` requirement entirely.
+#
+# The check's job stays narrow on purpose: reject a file with no
+# recognisable `test(...)` construct in it at all (empty, a README, a
+# stray text file) so Runner does not launch a browser against something
+# that plainly is not a spec -- not to validate that a real `test*(...)`
+# call is well-formed Playwright. It is still a heuristic, not a parser: a
+# spec whose ONLY test calls live behind an unusual macro or code-gen layer
+# that never literally spells `test(` could still misfire this, but that
+# is a narrower and rarer gap than the substring check it replaces.
+_TEST_CALL = re.compile(r"\btest(\.\w+)*\s*\(")
+
+
 def _looks_loadable(content: str) -> bool:
-    return bool(content and content.strip()) and "test(" in content and "await" in content
+    return bool(content and content.strip()) and bool(_TEST_CALL.search(content))
 
 
 # Fallback-only vocabulary, used exclusively when a driver's result carries

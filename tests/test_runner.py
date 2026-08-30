@@ -263,6 +263,83 @@ def test_a_driver_exception_mid_run_is_a_crash_not_a_failure():
     assert out.data["failures"][0]["kind"] == "crash"
 
 
+# --- fix round 1: _looks_loadable must not silently skip real specs -------
+#
+# The original check required the bare substrings "test(" AND "await" --
+# copied from agents/author.py's _is_valid, which is right for validating
+# Author's own model output but wrong for a hand-authored or imported real
+# suite (Task 16's "Import" tile, Task 14g's GitHub-repo import). A spec
+# using test.only/test.skip/test.describe, or a legal synchronous test body
+# with no await at all, was marked "crash" and never reached run_spec --
+# silently losing that coverage on every run while the suite still read
+# green. See agents/runner.py's _looks_loadable docstring for the fix.
+
+def test_a_spec_using_test_only_is_loadable():
+    ctx = make_ctx(spec_results={"specs/x.spec.ts": {"passed": True}})
+    _seed(ctx, {"specs/x.spec.ts": "test.only('x', async ({ page }) => { await page.goto('/'); });"})
+    out = Runner().run(ctx)
+    assert out.data["failures"] == []
+    assert out.data["held"] == 1
+
+
+def test_a_spec_using_test_skip_is_loadable():
+    ctx = make_ctx(spec_results={"specs/x.spec.ts": {"passed": True}})
+    _seed(ctx, {"specs/x.spec.ts": "test.skip('x', async ({ page }) => { await page.goto('/'); });"})
+    out = Runner().run(ctx)
+    assert out.data["failures"] == []
+    assert out.data["held"] == 1
+
+
+def test_a_spec_using_test_describe_is_loadable():
+    ctx = make_ctx(spec_results={"specs/x.spec.ts": {"passed": True}})
+    _seed(ctx, {
+        "specs/x.spec.ts": (
+            "test.describe('suite', () => {\n"
+            "  test('x', async ({ page }) => { await page.goto('/'); });\n"
+            "});\n"
+        ),
+    })
+    out = Runner().run(ctx)
+    assert out.data["failures"] == []
+    assert out.data["held"] == 1
+
+
+def test_a_synchronous_spec_with_no_await_is_loadable():
+    ctx = make_ctx(spec_results={"specs/x.spec.ts": {"passed": True}})
+    _seed(ctx, {"specs/x.spec.ts": "test('x', ({ page }) => { page.goto('/'); });"})
+    out = Runner().run(ctx)
+    assert out.data["failures"] == []
+    assert out.data["held"] == 1
+
+
+def test_an_empty_file_is_still_a_crash():
+    ctx = make_ctx()
+    _seed(ctx, {"specs/empty.spec.ts": ""})
+    out = Runner().run(ctx)
+    assert out.data["failures"][0]["kind"] == "crash"
+
+
+def test_a_readme_is_still_a_crash():
+    ctx = make_ctx()
+    _seed(ctx, {"specs/README.spec.ts": "# Checkout suite\n\nThis directory holds the checkout specs."})
+    out = Runner().run(ctx)
+    assert out.data["failures"][0]["kind"] == "crash"
+
+
+def test_a_loadable_spec_actually_reaches_run_spec(monkeypatch):
+    # The test that would have caught the original bug: a spec must not
+    # merely fail to be labelled "crash" -- it must actually be handed to
+    # the driver. Asserting only on the outcome would have passed even if
+    # the crash check were simply deleted and every spec silently no-opped.
+    ctx = make_ctx(spec_results={"specs/x.spec.ts": {"passed": True}})
+    _seed(ctx, {"specs/x.spec.ts": "test.only('x', async ({ page }) => { await page.goto('/'); });"})
+    calls = []
+    real_run_spec = ctx.browser.run_spec
+    monkeypatch.setattr(ctx.browser, "run_spec", lambda path: (calls.append(path), real_run_spec(path))[1])
+    Runner().run(ctx)
+    assert calls == ["specs/x.spec.ts"]
+
+
 # --- classification: structured signal first, string-matching as fallback --
 
 def test_it_falls_back_to_string_matching_when_no_structured_fields_are_present():
