@@ -310,3 +310,47 @@ def test_redact_does_not_warn_for_the_scalars_it_deliberately_passes_through(cap
             {"n": 1, "ok": True, "score": 0.5, "none": None, "at": datetime.datetime(2026, 1, 1)}
         ) == {"n": 1, "ok": True, "score": 0.5, "none": None, "at": datetime.datetime(2026, 1, 1)}
     assert caplog.records == []
+
+
+# --- discovered while building Plumbline's app object (Task 8a) ------------
+
+
+def test_constructing_a_store_with_no_client_override_does_not_touch_gcp_credentials():
+    # Store(config) with no client= used to build a real
+    # google.cloud.firestore.Client() inside __init__, which resolves
+    # Application Default Credentials immediately -- raising
+    # DefaultCredentialsError in any environment without them configured.
+    # That made constructing a bare `Store`/`Repo` (with no explicit
+    # client) unsafe to do at *import* time, which is exactly what
+    # app/main.py's module-level `app = build_app()` does so
+    # `uvicorn app.main:app` has something to serve. This confirms
+    # construction alone -- with real credentials genuinely absent from
+    # this environment -- no longer raises.
+    store = Store(load_config(prefix="a11y"))  # no client= override
+    # No assertion beyond "construction did not raise": actually using
+    # this store would still need real credentials the moment a method
+    # touches Firestore, which is correct and unchanged -- only the
+    # *timing* of that requirement moved from construction to first use.
+    assert store is not None
+
+
+def test_the_real_client_is_built_at_most_once_across_repeated_access(monkeypatch):
+    # A caller that touches Firestore for real should get the same client
+    # object back on every subsequent property access, not a fresh one
+    # built (and credential-checked) again each time.
+    from google.cloud import firestore
+
+    calls = []
+
+    class _FakeRealClient:
+        def __init__(self, project):
+            calls.append(project)
+
+    monkeypatch.setattr(firestore, "Client", _FakeRealClient)
+
+    store = Store(load_config(prefix="a11y"))
+    assert calls == []  # not built at construction
+    first = store._client
+    second = store._client
+    assert len(calls) == 1  # built exactly once
+    assert first is second

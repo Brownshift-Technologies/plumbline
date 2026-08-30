@@ -161,3 +161,78 @@ def test_frozen_run_supports_the_dict_copy_idiom():
     assert finished.state == "finished"
     assert run.state == "queued"
     assert finished.id == run.id
+
+
+# --- Task 2's review, carried forward: put_user normalises email -----------
+
+
+def test_put_user_lowercases_a_mixed_case_email_at_write_time():
+    r = _repo()
+    r.put_user(User(id="u1", email="Roger@Acme.com", password_hash="x", name="Roger K."))
+    assert r.user("u1").email == "roger@acme.com"
+    assert r.user_by_email("roger@acme.com").id == "u1"
+    assert r.user_by_email("Roger@Acme.com").id == "u1"
+
+
+def test_put_user_normalisation_does_not_mutate_the_caller_supplied_dataclass():
+    # A frozen dataclass cannot be mutated, but this guards the *stored*
+    # representation specifically: the object the caller passed in must
+    # still report the email it was constructed with.
+    original = User(id="u2", email="Mixed@Case.com", password_hash="x", name="M")
+    r = _repo()
+    r.put_user(original)
+    assert original.email == "Mixed@Case.com"
+
+
+# --- claim_email: the transactional guard against a signup race -----------
+
+
+def test_claim_email_succeeds_once_and_then_refuses():
+    r = _repo()
+    assert r.claim_email("race@acme.com", "u1") is True
+    assert r.claim_email("race@acme.com", "u2") is False
+
+
+def test_claim_email_is_case_insensitive():
+    r = _repo()
+    assert r.claim_email("Race@Acme.com", "u1") is True
+    assert r.claim_email("race@acme.com", "u2") is False
+
+
+def test_two_real_concurrent_claims_for_the_same_email_only_one_wins():
+    # Mirrors tests/test_ledger.py's
+    # test_concurrent_appends_to_one_workspace_do_not_fork_the_chain:
+    # force a real interleaving (writer B runs its whole claim to
+    # completion in the middle of writer A's transaction, right after A
+    # has read the "not claimed yet" snapshot but before A commits) rather
+    # than just calling claim_email twice in sequence, which never
+    # exercises FakeTransaction's abort-and-retry path at all. A's commit
+    # must abort against the version B just wrote and retry, so A's retry
+    # reads B's claim and correctly loses -- exactly one of the two calls
+    # observed by the *test* returns True.
+    from core import fakes
+
+    fake = FakeFirestore()
+    r_a = Repo(_config(), client=fake)
+    r_b = Repo(_config(), client=fake)
+
+    original_get = fakes.FakeDoc.get
+    interleaved = []
+    b_result = []
+
+    def get_then_let_the_other_writer_in(self, transaction=None):
+        snapshot = original_get(self, transaction=transaction)
+        if self._path == "plumbline_user_emails/racer@acme.com" and not interleaved:
+            interleaved.append(True)
+            b_result.append(r_b.claim_email("racer@acme.com", "u_b"))
+        return snapshot
+
+    fakes.FakeDoc.get = get_then_let_the_other_writer_in
+    try:
+        a_result = r_a.claim_email("racer@acme.com", "u_a")
+    finally:
+        fakes.FakeDoc.get = original_get
+
+    assert interleaved == [True], "the interleaving never happened"
+    assert b_result == [True]  # B ran to completion first and won
+    assert a_result is False  # A's retry saw B's claim and correctly lost

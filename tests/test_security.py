@@ -98,6 +98,21 @@ def test_verify_password_never_raises_on_a_malformed_hash():
         assert verify_password("anything", garbage) is False
 
 
+def test_verify_password_fails_closed_on_a_none_hash():
+    # Tasks 6/7's review: a None stored hash (a half-migrated row, a bad
+    # ORM default reaching a field typed non-Optional) must not raise
+    # AttributeError out of the auth path -- it must simply not verify.
+    assert verify_password("anything", None) is False
+
+
+def test_verify_password_fails_closed_on_a_non_string_hash():
+    # Any other non-string type reaching this far (an int id swapped in by
+    # a caller bug, a bytes value from a driver that didn't decode) must
+    # fail closed the same way, not raise.
+    for garbage in (12345, b"argon2-bytes-not-str", [], {}, object()):
+        assert verify_password("anything", garbage) is False
+
+
 def test_a_totp_code_does_not_verify_twice():
     # Replay: a code captured once (over a shoulder, in a log, on a
     # compromised link) must not be usable a second time inside its

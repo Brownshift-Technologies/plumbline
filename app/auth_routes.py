@@ -1,0 +1,221 @@
+"""Session-cookie auth: sign up, sign in, sign out, demo entry, password
+change, and session inventory/revocation.
+
+OAuth, TOTP enrolment/verification, and password reset are Task 8b -- this
+module is deliberately just the password + demo path. Every write here
+goes through `Repo`/`SessionService` rather than touching Firestore
+directly, and every response shape a test in `tests/test_auth_routes.py`
+or `tests/test_demo_mode.py` checks is chosen to be exactly what a
+frontend needs and nothing it has to reverse-engineer from an HTTP status
+code alone.
+"""
+
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from pydantic import BaseModel, EmailStr
+
+from app.deps import COOKIE, current_session
+from app.models import Membership, User
+from app.security import hash_password, verify_password
+
+router = APIRouter(prefix="/api/auth")
+
+# A signed-up account needs at least this many characters. 12 rather than a
+# smaller number matches NIST SP 800-63B's guidance that length, not
+# composition rules (forced digits/symbols), is what actually resists
+# offline guessing -- and it is the same floor `app/security.py`'s
+# argon2 cost is tuned to make expensive to brute-force per guess.
+_MIN_PASSWORD_LEN = 12
+
+# A syntactically valid argon2id hash of a fixed, unguessable password,
+# computed once at import time -- not per request. `signin` runs
+# `verify_password` against this whenever the email lookup misses, so a
+# nonexistent-account attempt costs the same wall-clock time as a
+# wrong-password attempt against a real account: both call `_ph.verify`
+# once. Without this, "no such user" would return measurably faster than
+# "wrong password for a user that exists" (no argon2 hash to compute
+# against), and that timing gap is a user-enumeration oracle -- an
+# attacker learns which emails have accounts without guessing a single
+# password. Carried into this task from Tasks 6/7's review (Ruling 32).
+_DUMMY_HASH = hash_password("this-is-not-a-real-account-do-not-reuse-it")
+
+# The single 401 body every failed sign-in returns, whether the email does
+# not exist or the password is wrong for one that does. Two different
+# messages ("no such user" vs "wrong password") would themselves be a
+# user-enumeration oracle even with matched timing -- this closes both
+# channels, not just the timing one.
+_BAD_CREDENTIALS = "that email and password do not match"
+
+
+class SignUp(BaseModel):
+    email: EmailStr
+    password: str
+    name: str
+
+
+class SignIn(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class ChangePassword(BaseModel):
+    current: str
+    new: str
+
+
+def _set_cookie(response: Response, sid: str) -> None:
+    response.set_cookie(
+        COOKIE, sid, httponly=True, secure=True, samesite="lax", max_age=14 * 86400, path="/"
+    )
+
+
+@router.post("/signup")
+def signup(body: SignUp, request: Request, response: Response):
+    repo = request.app.state.repo
+    # Case-insensitive: `Repo.user_by_email` lower-cases its query, and
+    # `Repo.put_user` lower-cases what it stores (Task 2's review), so this
+    # check and the account it might collide with agree on casing no
+    # matter which case either request used.
+    if repo.user_by_email(body.email):
+        raise HTTPException(409, "that email already has an account")
+    if len(body.password) < _MIN_PASSWORD_LEN:
+        raise HTTPException(400, f"use at least {_MIN_PASSWORD_LEN} characters")
+
+    user = User(
+        id=f"u_{uuid.uuid4().hex[:12]}",
+        email=body.email,
+        password_hash=hash_password(body.password),
+        name=body.name,
+    )
+    # Transactional claim, not just the cheap check above: two signups for
+    # the same email racing each other can both pass that check before
+    # either writes -- see Repo.claim_email for why that would otherwise
+    # leave two ambiguous accounts on one email instead of one clean 409.
+    if not repo.claim_email(body.email, user.id):
+        raise HTTPException(409, "that email already has an account")
+    repo.put_user(user)
+
+    ws = request.app.state.bootstrap_workspace(user)
+    repo.put_workspace(ws)
+    repo.put_membership(
+        Membership(id=f"m_{uuid.uuid4().hex[:12]}", user_id=user.id, workspace_id=ws.id, role="owner")
+    )
+
+    sess = request.app.state.sessions.issue(user.id, ws.id, user_agent=request.headers.get("user-agent", ""))
+    _set_cookie(response, sess.id)
+    return {"id": user.id, "name": user.name, "workspace_id": ws.id}
+
+
+@router.post("/signin")
+def signin(body: SignIn, request: Request, response: Response):
+    repo = request.app.state.repo
+    user = repo.user_by_email(body.email)
+    if not user:
+        # Burn the same argon2 cost a real-account wrong-password attempt
+        # would pay, then fail with the identical body -- see _DUMMY_HASH.
+        verify_password(body.password, _DUMMY_HASH)
+        raise HTTPException(401, _BAD_CREDENTIALS)
+    if not verify_password(body.password, user.password_hash):
+        raise HTTPException(401, _BAD_CREDENTIALS)
+
+    ws_id = next((m.workspace_id for m in repo.memberships_for_user(user.id)), "")
+    sess = request.app.state.sessions.issue(
+        user.id, ws_id, user_agent=request.headers.get("user-agent", "")
+    )
+    _set_cookie(response, sess.id)
+    return {"id": user.id, "name": user.name, "workspace_id": ws_id}
+
+
+@router.post("/demo")
+def demo(request: Request, response: Response):
+    cfg = request.app.state.config
+    request.app.state.seed_demo_if_missing()
+    sess = request.app.state.sessions.issue("demo", cfg.demo_workspace_id, is_demo=True)
+    _set_cookie(response, sess.id)
+    return {
+        "id": "demo",
+        "name": "Demo visitor",
+        "workspace_id": cfg.demo_workspace_id,
+        "is_demo": True,
+    }
+
+
+@router.post("/signout")
+def signout(request: Request, response: Response, sess=Depends(current_session)):
+    request.app.state.sessions.revoke(sess.id)
+    response.delete_cookie(COOKIE, path="/")
+    return {"ok": True}
+
+
+@router.post("/password")
+def change_password(body: ChangePassword, request: Request, sess=Depends(current_session)):
+    # A demo visitor has no account to change the password of. This is the
+    # reference shape every write-capable route after this task follows for
+    # a demo session: 200, not an error, with `persisted: False` telling the
+    # frontend the action was accepted but intentionally not durable.
+    if sess.is_demo:
+        return {"demo": True, "persisted": False}
+
+    repo = request.app.state.repo
+    user = repo.user(sess.user_id)
+    if not user or not verify_password(body.current, user.password_hash):
+        raise HTTPException(400, "your current password is not correct")
+    if len(body.new) < _MIN_PASSWORD_LEN:
+        raise HTTPException(400, f"use at least {_MIN_PASSWORD_LEN} characters")
+
+    repo.put_user(type(user)(**{**user.__dict__, "password_hash": hash_password(body.new)}))
+    # Every *other* device signs out; the device that just proved knowledge
+    # of the new password (this request's own session) stays signed in.
+    request.app.state.sessions.revoke_all_except(user.id, sess.id)
+    return {"ok": True, "other_sessions_ended": True}
+
+
+@router.get("/me")
+def me(request: Request, sess=Depends(current_session)):
+    if sess.is_demo:
+        return {
+            "id": "demo",
+            "name": "Demo visitor",
+            "is_demo": True,
+            "workspace_id": sess.workspace_id,
+            "role": "reader",
+        }
+    user = request.app.state.repo.user(sess.user_id)
+    if not user:
+        # The account behind a still-live, non-demo session was deleted.
+        # Treat exactly like any other unresolved session (see
+        # app/deps.py's current_user for the same call) rather than 500ing.
+        raise HTTPException(401, "not signed in")
+    return {
+        "id": user.id,
+        "name": user.name,
+        "email": user.email,
+        "is_demo": False,
+        "workspace_id": sess.workspace_id,
+        "role": request.app.state.repo.role_of(user.id, sess.workspace_id),
+    }
+
+
+@router.get("/sessions")
+def sessions_list(request: Request, sess=Depends(current_session)):
+    return [
+        {"id": s.id, "user_agent": s.user_agent, "ip_city": s.ip_city, "current": s.id == sess.id}
+        for s in request.app.state.sessions.list_for_user(sess.user_id)
+    ]
+
+
+@router.delete("/sessions/{sid}")
+def session_revoke(sid: str, request: Request, sess=Depends(current_session)):
+    # Scoped to the caller's own sessions: list_for_user(sess.user_id) is the
+    # authorisation check, not just a convenience filter. Without it, any
+    # signed-in user could pass an arbitrary session id from a different
+    # account and revoke someone else's session -- a horizontal privilege
+    # escalation, and a realistic one, since session ids appear in this same
+    # router's own GET /sessions response for the caller's own sessions and
+    # an attacker only has to guess or observe one belonging to someone else.
+    owned_ids = {s.id for s in request.app.state.sessions.list_for_user(sess.user_id)}
+    if sid not in owned_ids:
+        raise HTTPException(404, "no such session")
+    request.app.state.sessions.revoke(sid)
+    return {"ok": True}

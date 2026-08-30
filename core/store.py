@@ -47,11 +47,45 @@ _redact = redact_deep
 class Store:
     def __init__(self, config: Config, client=None):
         self._prefix = config.firestore_prefix
-        if client is None:
+        self._project_id = config.project_id
+        # A caller-supplied client (every test in this codebase, via
+        # `core.fakes.FakeFirestore`) is stored as-is. `None` means "build
+        # the real Firestore client", deferred to `_client` below rather
+        # than done here -- see that property for why eager construction
+        # is a defect, not just a style choice.
+        self._client_override = client
+        self._real_client = None
+
+    @property
+    def _client(self):
+        """The Firestore client this `Store` reads and writes through.
+
+        Building the real client is deferred to first use rather than done
+        in `__init__`. `google.cloud.firestore.Client.__init__` resolves
+        Application Default Credentials immediately and raises
+        `DefaultCredentialsError` the instant none are configured -- so an
+        eager build means merely *constructing* a `Store(config)` with no
+        `client=` override fails in any environment without live GCP
+        credentials: a CI runner, a fresh dev sandbox, this repo's own test
+        collection. That is precisely what `app.main`'s module-level
+        `app = build_app()` does at *import* time (so `uvicorn
+        app.main:app` has something to serve) -- discovered here because an
+        eager `Store` made `from app.main import build_app`, which
+        `tests/conftest.py` needs, crash before pytest could collect a
+        single test. Deferring the credential lookup to first actual read
+        or write leaves every real call site's behaviour unchanged (it
+        still needs working credentials the moment it touches Firestore for
+        real) while letting the module import -- and a `Store`/`Repo`
+        construct -- cleanly in an environment that never ends up needing
+        the real client at all, which describes every test in this suite.
+        """
+        if self._client_override is not None:
+            return self._client_override
+        if self._real_client is None:
             from google.cloud import firestore
 
-            client = firestore.Client(project=config.project_id)
-        self._client = client
+            self._real_client = firestore.Client(project=self._project_id)
+        return self._real_client
 
     def _name(self, collection: str) -> str:
         return f"{self._prefix}_{collection}"

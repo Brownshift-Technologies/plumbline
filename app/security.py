@@ -23,6 +23,19 @@ def hash_password(pw: str) -> str:
 
 
 def verify_password(pw: str, hashed: str) -> bool:
+    # A missing or malformed *stored* hash is not a password guess -- there
+    # is no valid hash on the other end for a timing difference to leak
+    # anything about, so this guard is not the short-circuit the comment
+    # below forbids. It exists because argon2-cffi's `verify` calls
+    # `.encode()` on `hashed` before it ever gets far enough to raise
+    # `InvalidHashError`: a `None` or non-string hash (a half-migrated row,
+    # a bad default, a caller passing the wrong field) raises a plain
+    # `AttributeError` that neither except clause below catches, and an
+    # exception escaping the auth path is worse than a clean `False` --
+    # Tasks 6/7's review caught this. `User.password_hash` is typed
+    # non-Optional, but a type hint is not runtime-enforced.
+    if not hashed or not isinstance(hashed, str):
+        return False
     # No length/prefix short-circuit runs before the argon2 call: every
     # input, right or wrong, goes through the full hash-and-compare, so
     # failure timing cannot leak how close a guess was. argon2-cffi's

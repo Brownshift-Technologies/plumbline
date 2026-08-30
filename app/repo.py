@@ -38,7 +38,53 @@ class Repo:
 
     # users -----------------------------------------------------------
     def put_user(self, u: User) -> None:
-        self._store.put("users", u.id, to_dict(u))
+        # Lower-case the stored email at this one choke point, matching
+        # `user_by_email`'s query below. Firestore's `==` is case-sensitive,
+        # so a caller that stored "Roger@Acme.com" verbatim and later queried
+        # "roger@acme.com" would silently find nobody -- a genuine sign-in
+        # failure that looks like a wrong password, not a normalisation bug.
+        # Doing this here, once, is what keeps every future caller of
+        # put_user from having to remember to lower-case first (Task 2's
+        # review carried this forward as a defect).
+        data = to_dict(u)
+        data["email"] = data["email"].lower()
+        self._store.put("users", u.id, data)
+
+    def claim_email(self, email: str, user_id: str) -> bool:
+        """Atomically reserve `email` (case-insensitive) for `user_id`.
+        Returns False if it is already claimed by someone else.
+
+        `user_by_email` is a query and `put_user` is a separate write, with
+        no atomicity between them -- two signups racing on the same email
+        can both see `user_by_email` miss before either has called
+        `put_user`, and without something serialising them, both proceed
+        and leave two `User` documents that share one email. Worse than a
+        plain lost-update: `user_by_email` returns `rows[0]` of whatever
+        `query()`'s underlying stream yields, which is not even guaranteed
+        stable across reads, so which of the two accounts a later sign-in
+        reaches becomes nondeterministic. `app/auth_routes.py`'s `signup`
+        calls this, inside the same request, after its own cheap
+        `user_by_email` check but before `put_user` -- the transactional
+        claim below is what actually closes the race window; the earlier
+        check is just a fast path for the common, non-concurrent case.
+        Backed by one document per email in its own collection (not a
+        field on `users`) so the claim and the account can be reasoned
+        about, and tested, independently. Same transactional pattern
+        `gateway/ledger.py` uses for its head pointer.
+        """
+        from google.cloud import firestore
+
+        ref = self._store.doc("user_emails", email.lower())
+
+        @firestore.transactional
+        def _claim(transaction) -> bool:
+            snapshot = ref.get(transaction=transaction)
+            if snapshot.exists:
+                return False
+            transaction.set(ref, {"user_id": user_id})
+            return True
+
+        return _claim(self._store.transaction())
 
     def user(self, uid: str) -> User | None:
         return _rebuild(User, self._store.get("users", uid))
