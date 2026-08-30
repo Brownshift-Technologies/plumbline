@@ -7,7 +7,7 @@
  *   rather than leaving callers to inspect a bare `Response`.
  */
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? "/api";
+export const API_BASE = import.meta.env.VITE_API_BASE ?? "/api";
 
 export class ApiError extends Error {
   readonly status: number;

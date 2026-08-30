@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Outlet } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
+import { DemoBanner } from "./DemoBanner";
 
 export function AppShell() {
   const [navOpen, setNavOpen] = useState(false);
@@ -26,6 +27,7 @@ export function AppShell() {
       />
       <div className="main">
         <TopBar onOpenNav={() => setNavOpen(true)} navTriggerRef={navTriggerRef} />
+        <DemoBanner />
         <Outlet />
       </div>
     </div>

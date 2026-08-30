@@ -37,3 +37,30 @@
   color: var(--ink2);
 }
 .avatar-menu-item:hover { background: var(--hover); }
+
+/* Persistent demo-session banner (no equivalent in the prototype, which
+   has no notion of an active session). Sits above the page body inside
+   `.main` so it scrolls with content rather than the fixed topbar. */
+.demo-banner {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 24px;
+  background: var(--brand-w);
+  border-bottom: 1px solid var(--brand-w2);
+  color: var(--brand);
+  font-size: 13.5px;
+  font-weight: 500;
+}
+.demo-banner .icon { color: var(--brand); flex: none; }
+.demo-banner a { text-decoration: underline; font-weight: 600; margin-left: auto; flex: none; }
+
+/* The prototype's OAuth row used <button data-go="home"> as a click-handler
+   stand-in; a real OAuth start is a GET navigation to the provider, so
+   SignIn renders these as <a href>. Same look as `.oauth button`. */
+.oauth a {
+  display: flex; align-items: center; justify-content: center; gap: 9px; padding: 9px;
+  border: 1px solid var(--line); border-radius: 7px; background: var(--white);
+  font-size: 14.5px; font-weight: 600; color: inherit; transition: border-color .12s;
+}
+.oauth a:hover { border-color: #D6D3CD; background: #FCFBF9; }
