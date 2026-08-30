@@ -77,6 +77,12 @@ export const api = {
   post: <T>(path: string, body?: unknown, init?: Omit<RequestInit, "body">) =>
     request<T>(path, { ...init, method: "POST", body }),
 
+  patch: <T>(path: string, body?: unknown, init?: Omit<RequestInit, "body">) =>
+    request<T>(path, { ...init, method: "PATCH", body }),
+
+  put: <T>(path: string, body?: unknown, init?: Omit<RequestInit, "body">) =>
+    request<T>(path, { ...init, method: "PUT", body }),
+
   del: <T>(path: string, init?: Omit<RequestInit, "body">) =>
     request<T>(path, { ...init, method: "DELETE" }),
 };
