@@ -26,23 +26,37 @@ fault into this environment."
 
 Latency is derived from the workspace's own observed p99, not drawn at
 random -- `_observed_p99_ms` reads every `Run.duration_ms` this workspace
-has already recorded (`Runner`, Task 12a, is what populates those) and takes
-the 99th-percentile value as the upstream's baseline. Two consecutive Chaos
-runs against an unchanged workspace read the same history and so must
-compute the same latency -- randomness anywhere in this path would make
-`test_latency_is_derived_from_p99_not_random` fail, and would make a
-"replay this fault under the same seed" claim (the same claim Runner's own
-module docstring builds Triager's "reproduced 5 of 5" on) false for Chaos's
-half of the story too.
+has already recorded and takes the 99th-percentile value as the upstream's
+baseline. Two consecutive Chaos runs against an unchanged workspace read
+the same history and so must compute the same latency -- randomness
+anywhere in this path would make `test_latency_is_derived_from_p99_not_
+random` fail, and would make a "replay this fault under the same seed"
+claim (the same claim Runner's own module docstring builds Triager's
+"reproduced 5 of 5" on) false for Chaos's half of the story too.
 
-A workspace with no recorded runs yet -- the first ever Chaos run against a
-brand new site -- has no p99 to derive anything from. That is a real,
-common state (see the task report's point-7 discussion), not an error:
-`_observed_p99_ms` returns `None` in that case, and `run()` falls back to
-`_DEFAULT_P99_MS`, saying so explicitly in `detail` (which still always
-mentions "p99" -- see `test_it_says_why_it_chose_that_latency` -- because
-"we have no observed p99 yet, so we used the documented default" is itself
-the reason a caller asked for).
+Nothing in this codebase populates `Run.duration_ms` in production yet, as
+of this task -- `Repo.put_run` (`app/repo.py`) has no caller outside this
+module's own tests, which seed it by hand. That is deliberately not this
+module's job to fix: Task 13's orchestrator is what will call `Repo.put_run`
+with each real run's timing once it exists, the same way it will hand
+Triager an actual failure list (see that task's own report). Until then,
+every real Chaos run takes the fallback branch below -- `_observed_p99_ms`
+returning `None` and `run()` using `_DEFAULT_P99_MS` -- and the
+observed-history branch only exercises against hand-seeded `Run` rows in
+`tests/test_chaos.py`. The logic for both branches is correct and tested
+regardless of which one production traffic currently reaches; this
+docstring says so explicitly rather than implying Runner already wires this
+up, since it does not.
+
+A workspace with no recorded runs yet -- true for every real workspace
+today, not only a brand new site's first-ever run -- has no p99 to derive
+anything from. That is the current, real-world path, not an edge case: see
+the task report's point-7 discussion for why it is still a genuinely
+successful run and not an error. `_observed_p99_ms` returns `None` in that
+case, and `run()` falls back to `_DEFAULT_P99_MS`, saying so explicitly in
+`detail` (which still always mentions "p99" -- see `test_it_says_why_it_
+chose_that_latency` -- because "we have no observed p99 yet, so we used the
+documented default" is itself the reason a caller asked for).
 
 The toxic-input corpus (`_TOXIC_CORPUS`) is fixed, not sampled -- the whole
 list is returned on every `toxic_input` run, which is what makes

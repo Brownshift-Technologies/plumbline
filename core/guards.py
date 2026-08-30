@@ -103,6 +103,122 @@ _PHONE = re.compile(
 _PAN = re.compile(r"(?<!\d)(?:\d[ -]?){12,18}\d(?!\d)")
 
 
+# --- credentials -----------------------------------------------------------
+#
+# Fix round on Task 12b: `redact_pii`'s original four patterns are all *PII
+# shapes* (email, card, SSN, phone) -- a credential has none of those shapes,
+# so none of them ever caught one, and a bearer token or an AWS secret
+# embedded in a HAR or trace flowed straight through `redact_deep` into a
+# model prompt and, worse, into `Finding.title` -- rendered in the UI,
+# exported to CSV, and written to an append-only ledger this codebase
+# deliberately cannot edit afterwards (`gateway/ledger.py`). That is a wider
+# blast radius than the raw trace it came from ever had on its own.
+#
+# Every pattern below is ANCHORED -- a fixed prefix a real credential of that
+# kind actually starts with (`AKIA`, `AIza`, `ghp_`, `sk_live_`, ...), or a
+# literal key name a credential is actually assigned to (`aws_secret_access_
+# key=`, `token=`). None of them is a bare high-entropy-string heuristic:
+# `test_a_commit_sha_is_not_redacted`, `test_a_uuid_is_not_redacted`, and
+# `test_a_trace_id_is_not_redacted` exist specifically to keep it that way --
+# a commit SHA, a UUID, a trace id, and a long CSS content hash are all
+# high-entropy strings that are NOT secrets, and redacting one of those would
+# corrupt the exact artefact a person needs in order to read a failure (the
+# same principle `_PAN`'s Luhn check already exists to protect -- see its
+# own comment above).
+#
+# Order matters, deliberately, the same way PAN-before-SSN already does:
+#
+# 1. Basic auth, then Bearer, then bare JWT -- in that order. An
+#    `Authorization: Bearer <token>` header's token is very often itself a
+#    JWT (three base64url segments joined by dots); `_redact_bearer` claims
+#    the WHOLE "Bearer <token>" span first, so a JWT living inside an
+#    Authorization header always redacts as `[BEARER]`, never `[JWT]` --
+#    deterministic, chosen because "this was an Authorization header" is the
+#    more useful fact to a reader than "the token happened to be JWT-shaped".
+#    `_redact_jwt` still runs after, to catch a JWT sitting bare elsewhere
+#    (a cookie value, a JSON field) with no "Bearer" prefix at all.
+# 2. Every vendor-prefixed credential (GitHub, Google, Stripe, AWS, Plumbline's
+#    own `pk_live_`) runs BEFORE the generic `password=`/`api_key=`/`secret=`/
+#    `token=` pattern. A vendor-prefixed credential passed AS a query
+#    parameter (`?api_key=AIzaSy...`) redacts to its specific
+#    `[GOOGLE_API_KEY]` marker first; the generic pattern's value character
+#    class then deliberately excludes `[`/`]` (see `_SECRET_PARAM` below), so
+#    it cannot re-match and downgrade an already-specific marker into the
+#    generic `[SECRET]` one. This makes the two layers order-INDEPENDENT in
+#    practice (either order gives the same, most-specific-marker-wins
+#    result) -- the ordering below is still fixed for the same reason PAN
+#    always runs before SSN: so nobody has to re-derive it is safe on every
+#    read.
+# 3. All of the above run before `_redact_pan`/`_SSN`/`_PHONE`. A credential
+#    value can contain a stretch of digits (rare, but not impossible for an
+#    opaque token) that happens to pass the PAN pattern's shape; claiming the
+#    credential context first means a token value is always labelled
+#    `[SECRET]`/`[GITHUB_TOKEN]`/etc, never misleadingly downgraded to
+#    `[CARD]` because part of it happened to look numeric.
+_BASIC_AUTH = re.compile(r"(?i)\bBasic\s+[A-Za-z0-9+/=]+")
+_BEARER = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9\-_.]+")
+# Three base64url segments (header, payload, signature) joined by dots.
+# Found by this fix round's own tests: a bare "3 dotted segments of 8+
+# word/hyphen characters" shape is NOT specific enough on its own -- it
+# matched "verylongname.verylongname.verylongname" in one of this module's
+# existing over-limit-email tests, an ordinary dotted repeat with no secret
+# in it at all. Anchored instead on "eyJ" -- the near-universal JWT header
+# prefix (`{"typ":"JWT",...}` base64url-encodes to "eyJ0eXAiOiJKV1Qi..." or
+# "eyJhbGciOiJIUzI1NiJ9...", since `{"` always encodes to "eyJ"), the same
+# JWT-detection anchor used in practice everywhere this shape needs
+# recognising. This is a real narrowing of coverage (a JWT whose header
+# segment does not start "eyJ" -- possible in principle, vanishingly rare in
+# practice) traded for not redacting an arbitrary dotted three-word phrase;
+# see the module's "do not over-redact" tests.
+_JWT = re.compile(r"\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b")
+# ghp_/gho_/ghu_/ghs_/ghr_ (classic PATs and OAuth-derived tokens) and
+# github_pat_ (fine-grained PATs) -- the five single-letter classic prefixes
+# and the one long-form prefix GitHub itself documents.
+_GITHUB_TOKEN = re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,255}\b|\bgithub_pat_[A-Za-z0-9_]{20,255}\b")
+# Google API keys are always exactly "AIza" + 35 more characters.
+_GOOGLE_API_KEY = re.compile(r"\bAIza[0-9A-Za-z_\-]{35}\b")
+_GOOGLE_OAUTH_SECRET = re.compile(r"\bGOCSPX-[0-9A-Za-z_\-]{20,}\b")
+_STRIPE_KEY = re.compile(r"\b(?:sk_live|sk_test|rk_live)_[0-9A-Za-z]{10,}\b")
+# AWS access key ids are always exactly "AKIA" + 16 uppercase alphanumerics.
+_AWS_ACCESS_KEY = re.compile(r"\bAKIA[0-9A-Z]{16}\b")
+# An AWS secret access key has no distinctive prefix of its own -- it is a
+# 40-character base64-ish string that would need a bare entropy heuristic to
+# catch in isolation, exactly what this module deliberately avoids (see the
+# comment above). Anchored instead on the literal field name it is actually
+# assigned to in a HAR body, a trace, or a dumped config -- the same "context
+# is the anchor" idea `_SECRET_PARAM` below uses for `token=`/`secret=`.
+_AWS_SECRET = re.compile(r'(?i)aws_secret_access_key\s*[:=]\s*"?[A-Za-z0-9/+=]{40}"?')
+_PLUMBLINE_KEY = re.compile(r"\bpk_live_[0-9A-Za-z]{10,}\b")
+# The generic case: no vendor prefix at all, only a key name that says
+# "credential" -- `password`, `api_key`, `secret`, `token`, and the three
+# compound OAuth-flow names (`access_token`, `refresh_token`, `client_
+# secret`) a checkout/OAuth HAR is realistically full of. Anchored on a
+# boundary character (query-string/form-body position: start of string,
+# `?`, `&`, `;`, whitespace, a quote, or `>`) immediately before the key
+# name, not a bare `\b`, so `my_password=`/`redirect_token=` -- a DIFFERENT
+# key that merely ends in one of these words -- is deliberately left alone:
+# only the literal key name at a genuine parameter boundary counts. Only the
+# VALUE is replaced (the key name stays, so a reader still knows a
+# credential-shaped parameter was there); the value's character class
+# excludes `[`/`]` specifically so this pattern can never re-match and
+# downgrade an already-specific marker like `[GOOGLE_API_KEY]` -- see point 2
+# above.
+_SECRET_PARAM_NAMES = (
+    "access_token", "refresh_token", "client_secret", "api_key", "password", "secret", "token",
+)
+_SECRET_PARAM = re.compile(
+    r'(?i)(?:^|(?<=[?&;\s"\'>]))(' + "|".join(_SECRET_PARAM_NAMES) + r')=([^&\s"\'<>\[\]]+)'
+)
+
+
+def _redact_secret_params(text: str) -> str:
+    return _SECRET_PARAM.sub(lambda m: f"{m.group(1)}=[SECRET]", text)
+
+
+def _redact_aws_secret(text: str) -> str:
+    return _AWS_SECRET.sub("aws_secret_access_key=[AWS_SECRET]", text)
+
+
 def _luhn_ok(digits: str) -> bool:
     total, alt = 0, False
     for ch in reversed(digits):
@@ -153,7 +269,26 @@ def redact_pii(text: str) -> str:
     # "546 742173 6614" redacts to "[SSN] 6614" in this order, and to
     # "546 [PHONE]" if the two .sub() calls are swapped. SSN goes first so
     # the more sensitive reading wins.
+    #
+    # Credentials (added on the Task 12b fix round) all run after EMAIL and
+    # before PAN/SSN/phone -- see the "--- credentials ---" section above
+    # this function for the full ordering rationale (Basic before Bearer
+    # before bare JWT; every vendor-prefixed pattern before the generic
+    # `password=`/`api_key=`/`secret=`/`token=` one; all of them before the
+    # PII-number patterns so a token value with a digit run inside it is
+    # never misread as a card or SSN).
     text = _EMAIL.sub("[EMAIL]", text)
+    text = _BASIC_AUTH.sub("[BASIC_AUTH]", text)
+    text = _BEARER.sub("[BEARER]", text)
+    text = _JWT.sub("[JWT]", text)
+    text = _GITHUB_TOKEN.sub("[GITHUB_TOKEN]", text)
+    text = _GOOGLE_API_KEY.sub("[GOOGLE_API_KEY]", text)
+    text = _GOOGLE_OAUTH_SECRET.sub("[GOOGLE_OAUTH_SECRET]", text)
+    text = _STRIPE_KEY.sub("[STRIPE_KEY]", text)
+    text = _AWS_ACCESS_KEY.sub("[AWS_ACCESS_KEY]", text)
+    text = _redact_aws_secret(text)
+    text = _PLUMBLINE_KEY.sub("[PLUMBLINE_KEY]", text)
+    text = _redact_secret_params(text)
     text = _redact_pan(text)
     text = _SSN.sub("[SSN]", text)
     text = _PHONE.sub("[PHONE]", text)

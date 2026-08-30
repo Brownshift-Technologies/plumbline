@@ -314,3 +314,168 @@ def test_redact_deep_a_shared_but_non_cyclic_reference_is_not_flagged_circular()
     shared = ["sam@example.com"]
     out = redact_deep({"a": shared, "b": shared})
     assert out == {"a": ["[EMAIL]"], "b": ["[EMAIL]"]}
+
+
+# --- credentials (Task 12b fix round) -------------------------------------
+#
+# A credential has no PII shape at all, so none of the four patterns above
+# ever caught one -- a bearer token or an AWS secret embedded in a HAR or
+# trace flowed straight through redact_deep and into a model prompt, and
+# potentially into Finding.title (rendered in the UI, exported to CSV,
+# written to an append-only ledger). See core/guards.py's own
+# "--- credentials ---" comment for the full pattern-by-pattern and
+# ordering rationale these tests pin.
+
+_JWT_EXAMPLE = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dQw4w9WgXcQ"
+_GOOGLE_API_KEY_EXAMPLE = "AIza" + "SyD1234567890abcdefghijklmnopqrstuvw"[:35]
+
+
+def test_a_bearer_token_is_redacted():
+    out = redact_pii(f"Authorization: Bearer {_JWT_EXAMPLE}")
+    assert out == "Authorization: [BEARER]"
+
+
+def test_a_bearer_tokens_jwt_is_claimed_by_bearer_not_by_the_bare_jwt_pattern():
+    # Order matters (see core/guards.py): Bearer claims the WHOLE "Bearer
+    # <token>" span before the bare-JWT pattern ever runs, so a JWT living
+    # inside an Authorization header always reads as [BEARER], never [JWT].
+    out = redact_pii(f"Authorization: Bearer {_JWT_EXAMPLE}")
+    assert "[JWT]" not in out
+
+
+def test_a_bare_jwt_is_redacted():
+    # No "Bearer" prefix at all -- a JWT sitting bare in a cookie value or a
+    # JSON field, still three dot-separated base64url segments.
+    assert redact_pii(f"refresh cookie = {_JWT_EXAMPLE}") == "refresh cookie = [JWT]"
+
+
+def test_a_dotted_three_word_phrase_is_not_mistaken_for_a_jwt():
+    # Found by this fix round's own tests: a bare "three dotted 8+ char
+    # segments" shape briefly matched this exact string (an existing
+    # over-limit-email fixture) before the JWT pattern was anchored on the
+    # "eyJ" header prefix real JWTs actually start with.
+    text = "verylongname." * 2 + "verylongname"
+    assert redact_pii(text) == text
+
+
+def test_a_basic_auth_header_is_redacted():
+    assert redact_pii("Authorization: Basic dXNlcjpwYXNz") == "Authorization: [BASIC_AUTH]"
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        "ghp_1234567890abcdefghijklmnopqrstuvwx",
+        "gho_1234567890abcdefghijklmnopqrstuvwx",
+        "github_pat_11ABCDEFG0123456789012_abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQ",
+    ],
+)
+def test_a_github_token_is_redacted(token):
+    assert redact_pii(f"clone with token {token}") == "clone with token [GITHUB_TOKEN]"
+
+
+def test_a_google_api_key_is_redacted():
+    assert redact_pii(f"key={_GOOGLE_API_KEY_EXAMPLE}") == "key=[GOOGLE_API_KEY]"
+
+
+def test_a_google_oauth_client_secret_is_redacted():
+    assert redact_pii("GOCSPX-abcdefghijklmnopqrstuvwx") == "[GOOGLE_OAUTH_SECRET]"
+
+
+@pytest.mark.parametrize("prefix", ["sk_live_", "sk_test_", "rk_live_"])
+def test_a_stripe_secret_key_is_redacted(prefix):
+    assert redact_pii(f"{prefix}51H8x2KJd9fooBarBaz1234567890") == "[STRIPE_KEY]"
+
+
+def test_an_aws_access_key_id_is_redacted():
+    assert redact_pii("AKIAIOSFODNN7EXAMPLE") == "[AWS_ACCESS_KEY]"
+
+
+def test_an_aws_secret_access_key_is_redacted_by_its_field_name():
+    # No distinctive prefix of its own -- anchored on the literal field name
+    # it is assigned to, not a bare entropy scan (see the "do not
+    # over-redact" tests below).
+    out = redact_pii("aws_secret_access_key=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")
+    assert out == "aws_secret_access_key=[AWS_SECRET]"
+
+
+def test_a_plumbline_api_key_is_redacted():
+    assert redact_pii("pk_live_abcdefghij1234567890") == "[PLUMBLINE_KEY]"
+
+
+@pytest.mark.parametrize(
+    "param",
+    ["password", "api_key", "secret", "token", "access_token", "refresh_token", "client_secret"],
+)
+def test_a_password_in_a_query_string_is_redacted(param):
+    out = redact_pii(f"GET /checkout?{param}=hunter2&other=1")
+    assert out == f"GET /checkout?{param}=[SECRET]&other=1"
+
+
+def test_a_secret_shaped_param_in_a_form_body_is_redacted():
+    assert redact_pii("password=hunter2") == "password=[SECRET]"
+
+
+def test_a_key_name_that_merely_ends_in_a_secret_word_is_left_alone():
+    # "my_password"/"redirect_token" are DIFFERENT parameter names that
+    # happen to end in a watched word -- only the literal key name at a
+    # genuine parameter boundary counts, so these are not false positives.
+    assert redact_pii("?my_password=hunter2") == "?my_password=hunter2"
+    assert redact_pii("?redirect_token=abc123") == "?redirect_token=abc123"
+
+
+def test_a_vendor_specific_marker_survives_being_passed_as_a_generic_param():
+    # Order-independence (see core/guards.py): a Google API key handed
+    # through a generic `api_key=` query param still redacts to the
+    # specific [GOOGLE_API_KEY] marker, not the generic [SECRET] one --
+    # the generic pattern's value class excludes "[" / "]" specifically so
+    # it cannot re-match and downgrade an already-specific marker.
+    out = redact_pii(f"?api_key={_GOOGLE_API_KEY_EXAMPLE}&x=1")
+    assert out == "?api_key=[GOOGLE_API_KEY]&x=1"
+
+
+def test_a_card_number_used_as_a_token_value_is_labelled_a_secret_not_a_card():
+    # Credentials run before PAN -- see core/guards.py's ordering comment.
+    # A token value that happens to be a digit run is still a token
+    # contextually, not a mislabelled card number.
+    assert redact_pii("token=4242424242424242") == "token=[SECRET]"
+
+
+# --- do not over-redact: high-entropy strings that are not secrets --------
+
+
+def test_a_commit_sha_is_not_redacted():
+    sha = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
+    assert redact_pii(f"deployed commit {sha}") == f"deployed commit {sha}"
+
+
+def test_a_uuid_is_not_redacted():
+    uuid = "550e8400-e29b-41d4-a716-446655440000"
+    assert redact_pii(f"request id {uuid}") == f"request id {uuid}"
+
+
+def test_a_trace_id_is_not_redacted():
+    trace_id = "4f3a9c2e1b7d4f3a9c2e1b7d4f3a9c2e"
+    assert redact_pii(f"trace {trace_id}") == f"trace {trace_id}"
+
+
+def test_a_long_css_content_hash_is_not_redacted():
+    css_hash = "a3f9c1e7b2d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c4e6b8d0f2a4c6e8b0d2f4a6"
+    assert redact_pii(f"styles.{css_hash}.css") == f"styles.{css_hash}.css"
+
+
+def test_a_secret_nested_in_a_har_shaped_dict_does_not_survive_redact_deep():
+    har = {
+        "log": {
+            "entries": [{
+                "request": {
+                    "headers": [{"name": "authorization", "value": f"Bearer {_JWT_EXAMPLE}"}],
+                    "postData": {"text": "password=hunter2&card=4242424242424242"},
+                },
+            }],
+        },
+    }
+    out = redact_deep(har)
+    entry = out["log"]["entries"][0]["request"]
+    assert entry["headers"][0]["value"] == "[BEARER]"
+    assert entry["postData"]["text"] == "password=[SECRET]&card=[CARD]"

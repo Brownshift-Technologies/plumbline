@@ -109,16 +109,15 @@ def test_pii_in_a_har_is_redacted_before_it_ever_reaches_the_model_prompt(ctx_ha
     assert "[CARD]" in ctx_har_with_card.model.calls[-1]["prompt"]
 
 
-def test_an_oauth_bearer_token_in_a_har_is_not_caught_by_redaction_today():
-    """A known, documented gap (see the task report), not an oversight: a
-    bearer token has no digit-run or email shape at all, so none of
-    `core.guards.redact_pii`'s patterns (email/card/SSN/phone) match it --
-    `redact_deep` passes it through a `.read` tool's result completely
-    unredacted. This test pins that CURRENT behaviour rather than silently
-    assuming the opposite; fixing it means adding a token/secret pattern to
-    the fleet-wide `core.guards` module (shared by every `.read` tool
-    across all eleven agents), which is out of this task's scope and is
-    flagged for the reviewer instead of being patched blind here."""
+def test_an_oauth_bearer_token_in_a_har_does_not_reach_the_model_prompt():
+    """Was a documented, known gap: `core.guards.redact_pii` originally
+    matched only PII shapes (email/card/SSN/phone), and a bearer token has
+    none of those -- it flowed straight through `redact_deep` into a model
+    prompt and, worse, into `Finding.title` (rendered in the UI, exported
+    to CSV, written into an append-only ledger). Closed at the source, in
+    `core/guards.py`, not patched blind inside this agent -- see that
+    module's own "--- credentials ---" section. This test now proves the
+    gap is closed rather than merely pinning that it existed."""
     ctx = _ctx(
         [{**_ASSERTION_FAILURE} for _ in range(5)],
         model_responses=("A stale checkout total.",),
@@ -128,10 +127,9 @@ def test_an_oauth_bearer_token_in_a_har_is_not_caught_by_redaction_today():
         )],
     )
     Triager(attempts=5).run(ctx)
-    assert "eyJhbGciOiJIUzI1NiJ9" in ctx.model.calls[-1]["prompt"], (
-        "documenting current behaviour: a bearer token is not PII-shaped, "
-        "so it is not redacted -- see this test's own docstring"
-    )
+    prompt = ctx.model.calls[-1]["prompt"]
+    assert "eyJhbGciOiJIUzI1NiJ9" not in prompt
+    assert "[BEARER]" in prompt
 
 
 def test_re_running_does_not_duplicate_the_finding(ctx):
