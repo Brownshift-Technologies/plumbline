@@ -29,14 +29,19 @@ import uuid
 from fastapi import FastAPI
 
 from app.account_routes import router as account_router
+from app.agent_routes import router as agent_router
 from app.auth_routes import router as auth_router
+from app.behaviour_routes import router as behaviour_router
+from app.billing_routes import router as billing_router
 from app.finding_routes import router as finding_router
+from app.ledger_routes import router as ledger_router
 from app.models import User, Workspace
 from app.oauth_routes import router as oauth_router
 from app.providers import GitHubProvider, GoogleProvider, OktaProvider
 from app.repo import Repo
 from app.run_routes import router as run_router
 from app.sessions import SessionService
+from app.surface_routes import router as surface_router
 from app.settings import PlumblineConfig, load_settings
 from core.events import enqueue_job
 from core.telemetry import log_event
@@ -240,6 +245,11 @@ def build_app(config: PlumblineConfig | None = None, repo: Repo | None = None) -
     app.include_router(account_router)
     app.include_router(run_router)
     app.include_router(finding_router)
+    app.include_router(surface_router)
+    app.include_router(behaviour_router)
+    app.include_router(agent_router)
+    app.include_router(ledger_router)
+    app.include_router(billing_router)
 
     @app.get("/_health")
     def _health():

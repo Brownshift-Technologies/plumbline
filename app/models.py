@@ -81,6 +81,16 @@ class Workspace:
     # a workspace that wants a third comparison adds a third orchestrator
     # step, not a new field here).
     environments: tuple[str, ...] = ()
+    # Task 14c: `POST /api/agents/pause` sets this; `job/orchestrator.py`'s
+    # `execute()` checks it before ever calling `Repo.claim_run` and, if
+    # set, leaves a `queued` run exactly as it found it -- unclaimed,
+    # unbilled, untouched -- rather than starting the fleet. That is what
+    # "takes effect on the next run, not mid-run" (the contract's own
+    # words) actually means: a run already `claim_run`'d and mid-sequence
+    # is never interrupted by a pause that lands after it started: this
+    # flag is only ever consulted once, at the very top of `execute()`,
+    # before any agent has run.
+    fleet_paused: bool = False
 
 
 @dataclass(frozen=True)

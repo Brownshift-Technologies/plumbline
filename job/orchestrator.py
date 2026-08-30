@@ -237,10 +237,23 @@ class Orchestrator:
             # docstring's "two workers" judgement call.
             return run
 
-        if self._repo.workspace(run.workspace_id) is None:
+        workspace = self._repo.workspace(run.workspace_id)
+        if workspace is None:
             # Deleted between enqueue and pickup -- nothing left to bill or
             # scope agents to. See the module docstring.
             return self._finish(run, "failed")
+
+        if workspace.fleet_paused:
+            # Task 14c: `POST /api/agents/pause` -- "takes effect on the
+            # next run, not mid-run" (that route's own contract). Checked
+            # here, before `claim_run` is ever called, so a paused
+            # workspace's queued run is left exactly as it is: still
+            # `queued`, `runs_used` untouched, unbilled, ready to run the
+            # moment `POST /api/agents/resume` clears the flag and some
+            # worker (a retry of this same execution, or a fresh one)
+            # reaches it again. Never reached for a run this process has
+            # already claimed -- pausing mid-sequence cannot interrupt it.
+            return run
 
         claimed = self._repo.claim_run(run_id)
         if claimed is None:
