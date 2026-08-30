@@ -106,6 +106,23 @@ class Route:
     path: str
     coverage_pct: int
     last_mapped: float = field(default_factory=time.time)
+    # Added for Task 11a (Author). `gateway/policy.py`'s SCOPES gives Author
+    # exactly `{"graph.read", "repo.write:specs"}` -- no `browser.read` --
+    # so a live page is not something Author's `run()` is ever allowed to
+    # visit itself. Its prompt still needs to describe "what's on this
+    # route" (Task 11a's brief: "the snapshot's interactive elements"), so
+    # that description has to already be sitting in the graph by the time
+    # Author reads it -- which means Cartographer, the one agent that IS
+    # scoped for `browser.read`, is the one that has to capture it during
+    # its crawl. `(ref, role, name)` triples rather than the richer dicts
+    # `BrowserDriver.a11y()` returns: a plain tuple of strings keeps `Route`
+    # hashable (frozen dataclasses hash on every field by default, and a
+    # `dict` inside would break that the moment anything ever hashes a
+    # `Route`), and Author only ever needs role+name to describe a control
+    # in a prompt -- level/state/disabled add detail an LLM prompt has no
+    # use for. Empty by default so a `Route` built the way Task 10's own
+    # tests build one (path + coverage only) stays valid.
+    elements: tuple[tuple[str, str, str], ...] = ()
 
 
 @dataclass(frozen=True)
