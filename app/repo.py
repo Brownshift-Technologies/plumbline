@@ -10,6 +10,7 @@ import time
 from app.models import (
     Behaviour,
     Finding,
+    Incident,
     Membership,
     PasswordReset,
     Patch,
@@ -195,6 +196,14 @@ class Repo:
     def patch_for_finding(self, fid: str) -> Patch | None:
         rows = self._store.query("patches", "finding_id", "==", fid)
         return _rebuild(Patch, rows[0]) if rows else None
+
+    # incidents ---------------------------------------------------------
+    def put_incident(self, i: Incident) -> None:
+        self._store.put("incidents", i.id, to_dict(i))
+
+    def incidents_for_workspace(self, wid: str) -> list[Incident]:
+        rows = [Incident(**r) for r in self._store.query("incidents", "workspace_id", "==", wid)]
+        return sorted(rows, key=lambda i: i.first_seen, reverse=True)
 
     # surface -----------------------------------------------------------
     def put_route(self, r: Route) -> None:

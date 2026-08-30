@@ -95,6 +95,28 @@ class AgentContext:
     real while blocking the one legitimate use (a Runner reusing one
     context's `repo`/`gateway` across several agents in a single run,
     swapping only `browser` state via `goto`).
+
+    `browsers` (fix round 1): Oracle's whole job is diffing two live
+    environments -- "does staging still match prod" -- which needs two
+    open `BrowserDriver`s alive at once, not the one `browser` field every
+    other agent gets by. This is additive, not a reshape of `browser`
+    itself: ten of the eleven agents read exactly one driver and should
+    keep doing so through the same field they always have, with nothing
+    new to learn. A dict keyed by environment name (`{"staging": ...,
+    "prod": ...}`) was chosen over a second fixed field (`browser_b`) or
+    replacing `browser` with a collection, for the same reason
+    `gateway/policy.py`'s `allow_only` was chosen over a `"!a,b,c"` string
+    DSL: Oracle's own comparison count is not actually fixed at two --
+    "does staging match prod" today, "do staging/canary/prod all agree"
+    tomorrow -- and a named mapping needs no new field or reshaped contract
+    to grow from one comparison to several. `browser` is deliberately left
+    out of `browsers` (no `"default"` alias pointing back at it): there is
+    exactly one obvious way to reach the primary driver -- `ctx.browser` --
+    and folding it into the dict too would mean two spellings for the same
+    thing, an ambiguity `tests/agent_fixtures.py`'s `make_ctx` was written
+    specifically not to introduce (see its `browsers=` parameter). Empty by
+    default, so building a context that needs only one driver -- the other
+    ten agents -- costs nothing.
     """
 
     workspace_id: str
@@ -103,6 +125,7 @@ class AgentContext:
     model: object
     browser: object
     repo: object
+    browsers: dict = field(default_factory=dict)
 
 
 class Agent(Protocol):

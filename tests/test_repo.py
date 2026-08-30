@@ -1,6 +1,7 @@
 from app.models import (
     Behaviour,
     Finding,
+    Incident,
     Membership,
     Patch,
     Route,
@@ -134,6 +135,21 @@ def test_patch_for_finding_round_trips():
 
 def test_patch_for_finding_is_none_when_no_patch_exists():
     assert _repo().patch_for_finding("nope") is None
+
+
+def test_incidents_for_workspace_newest_first():
+    r = _repo()
+    r.put_incident(
+        Incident(id="i1", workspace_id="ws1", source="sentinel", message="old", first_seen=1.0)
+    )
+    r.put_incident(
+        Incident(id="i2", workspace_id="ws1", source="sentinel", message="new", first_seen=2.0)
+    )
+    assert [i.message for i in r.incidents_for_workspace("ws1")] == ["new", "old"]
+
+
+def test_incidents_for_workspace_is_empty_for_an_unknown_workspace():
+    assert _repo().incidents_for_workspace("nope") == []
 
 
 # --- surface: routes and behaviours -----------------------------------------

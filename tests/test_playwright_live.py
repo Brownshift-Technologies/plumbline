@@ -75,3 +75,52 @@ def test_goto_a_real_page_and_snapshot_it(driver):
 def test_run_spec_raises_not_implemented(driver):
     with pytest.raises(NotImplementedError):
         driver.run_spec("specs/anything.spec.ts")
+
+
+# --- fix round 1 -----------------------------------------------------------
+
+
+def test_a_ref_survives_a_real_dom_mutation_that_inserts_a_sibling_above_it(driver):
+    # This is the exact scenario that broke Playwright's own [ref=eN]
+    # numbering (proven against this same real Chromium -- see the task
+    # report: "Pay"'s ref moved from e2 to e6 after inserting one unrelated
+    # button above it). _parse_aria_snapshot's content-derived ref must not
+    # move here.
+    driver._page.set_content(
+        '<button id="pay">Pay</button><a href="/cart">Cart</a>'
+    )
+    before = {e["name"]: e["ref"] for e in driver.a11y()}
+    driver._page.set_content(
+        '<button id="new">New</button><button id="pay">Pay</button><a href="/cart">Cart</a>'
+    )
+    after = {e["name"]: e["ref"] for e in driver.a11y()}
+    assert before["Pay"] == after["Pay"]
+    assert before["Cart"] == after["Cart"]
+
+
+def test_interactive_refs_are_stable_across_two_calls_on_the_same_real_page(driver):
+    driver._page.set_content(_HTML)
+    first = [e["ref"] for e in driver.interactive()]
+    second = [e["ref"] for e in driver.interactive()]
+    assert first == second
+
+
+def test_headers_reflects_a_real_response_header(driver):
+    driver._page.route("**/*", lambda route: route.fulfill(
+        status=200, headers={"X-Frame-Options": "DENY"}, body="<html></html>",
+    ))
+    driver.goto("https://example.test/")
+    assert driver.headers().get("x-frame-options") == "DENY"
+
+
+def test_cookies_reflects_a_real_set_cookie_response_header(driver):
+    driver._page.route("**/*", lambda route: route.fulfill(
+        status=200, headers={"Set-Cookie": "session=abc123; Path=/"}, body="<html></html>",
+    ))
+    driver.goto("https://example.test/")
+    names = [c["name"] for c in driver.cookies()]
+    assert "session" in names
+
+
+def test_headers_is_empty_before_any_goto(driver):
+    assert driver.headers() == {}

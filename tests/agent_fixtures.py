@@ -53,6 +53,7 @@ _CONFIG = PlumblineConfig(
 def make_ctx(
     *,
     pages: dict | None = None,
+    browsers: dict[str, dict] | None = None,
     model_responses=("ok",),
     spec_results: dict | None = None,
     workspace_id: str = "ws1",
@@ -75,6 +76,17 @@ def make_ctx(
     default that cannot be accidentally shared/mutated across calls the
     way a mutable one could), converted to a list because `FakeModel`
     itself pops through its responses by index off a list it owns.
+
+    `browsers` (fix round 1) is `{"env_name": pages_dict, ...}` -- the same
+    shape as `pages`, one per named environment -- for Oracle, the one
+    agent that needs more than the single `ctx.browser` every other agent
+    gets. Each entry becomes its own `FakeBrowser(pages_for_env,
+    spec_results)`, landing on `ctx.browsers["env_name"]`; `ctx.browser`
+    (the primary/default driver, built from the top-level `pages=`) is
+    unaffected either way, so a fixture that does not pass `browsers=` --
+    the other ten agents -- gets exactly the context it always has. See
+    `AgentContext.browsers`'s docstring for why a named mapping was chosen
+    over a second fixed field.
     """
     active_repo = repo or Repo(_CONFIG, client=FakeFirestore())
     return AgentContext(
@@ -84,4 +96,6 @@ def make_ctx(
         model=FakeModel(list(model_responses)),
         browser=FakeBrowser(pages or {}, spec_results),
         repo=active_repo,
+        browsers={name: FakeBrowser(env_pages, spec_results)
+                  for name, env_pages in (browsers or {}).items()},
     )

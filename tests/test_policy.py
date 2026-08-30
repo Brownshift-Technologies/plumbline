@@ -37,7 +37,18 @@ def test_chaos_may_write_to_staging():
 
 def test_every_agent_in_the_fleet_has_a_scope():
     assert set(SCOPES) == {"cartographer", "author", "healer", "chaos",
-                           "runner", "triager", "surgeon"}
+                           "runner", "triager", "surgeon", "sentinel",
+                           "auditor", "oracle", "economist"}
+
+
+def test_economist_can_write_nothing():
+    # An agent that recommends deleting tests must never be able to do it
+    # itself -- see gateway/policy.py's comment on the economist entry.
+    economist_scope = SCOPES["economist"]
+    assert not any(tool.startswith("repo.write") or tool.startswith("graph.write")
+                   for tool in economist_scope)
+    assert decide("economist", "repo.write:specs").allowed is False
+    assert decide("economist", "graph.write").allowed is False
 
 
 # --- from the brief: the rules mechanism ------------------------------------

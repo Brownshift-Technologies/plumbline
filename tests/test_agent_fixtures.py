@@ -84,3 +84,27 @@ def test_the_gateway_is_wired_to_the_same_repo_the_context_exposes():
 def test_make_ctx_does_not_pre_seed_a_workspace_row():
     ctx = make_ctx()
     assert ctx.repo.workspace(ctx.workspace_id) is None
+
+
+# --- browsers= for Oracle (fix round 1) ---------------------------------
+
+
+def test_make_ctx_builds_named_browsers_for_environment_comparison():
+    ctx = make_ctx(
+        pages={"/": {"links": ["/prod-only"]}},
+        browsers={"staging": {"/": {"links": ["/staging-only"]}}},
+    )
+    ctx.browser.goto("/")
+    ctx.browsers["staging"].goto("/")
+    assert ctx.browser.links() == ["/prod-only"]
+    assert ctx.browsers["staging"].links() == ["/staging-only"]
+
+
+def test_a_context_with_no_browsers_kwarg_has_an_empty_browsers_dict():
+    ctx = make_ctx()
+    assert ctx.browsers == {}
+
+
+def test_the_primary_browser_and_a_named_browser_are_independent_instances():
+    ctx = make_ctx(pages={"/": {"links": ["a"]}}, browsers={"staging": {"/": {"links": ["b"]}}})
+    assert ctx.browser is not ctx.browsers["staging"]

@@ -175,5 +175,33 @@ class Patch:
     gate_state: str = "awaiting_approval"
 
 
+@dataclass(frozen=True)
+class Incident:
+    """A live-site problem Sentinel found by watching a running deployment
+    -- a browser console error, a spike in a known error signature, a
+    request that started failing -- as opposed to a `Finding`, which is
+    what Triager produces from a *test run's* trace. Both land in the
+    workspace's problem backlog, but they start from opposite ends: a
+    `Finding` starts from a test that failed; an `Incident` starts from
+    production behaving badly with no test involved at all.
+
+    `count` and `first_seen` exist because Sentinel's job is to watch
+    continuously, not just report once: the same `source`+`message` seen
+    again is a repeat of an existing incident, not a new row, so a caller
+    bumps `count` in place rather than accumulating one row per occurrence
+    the way `Finding` (one row per triage) does not need to.
+    """
+
+    id: str
+    workspace_id: str
+    source: str
+    message: str
+    url: str = ""
+    stack: str = ""
+    count: int = 1
+    first_seen: float = field(default_factory=time.time)
+    status: str = "open"
+
+
 def to_dict(obj) -> dict:
     return asdict(obj)

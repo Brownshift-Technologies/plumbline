@@ -96,6 +96,27 @@ SCOPES: dict[str, frozenset[str]] = {
     "runner":       frozenset({"browser.drive", "artefact.write"}),
     "triager":      frozenset({"trace.read", "repo.read"}),
     "surgeon":      frozenset({"repo.write:src", "pr.open", "pr.merge"}),
+    # Added in Task 9's fix round 1: these four exist in the fleet (Task 9's
+    # brief names all eleven) but were left out of SCOPES because Task 9's
+    # own file list never included this module. Leaving them out any
+    # longer would mean each of their four agent tasks discovers, on its
+    # own, that `gateway.call` returns "unknown agent" for it -- ruled into
+    # this fix round instead. Sentinel and Economist both get exactly one
+    # write tool each (`repo.write:specs`, none) -- see below for why
+    # Economist gets none at all.
+    "sentinel":     frozenset({"telemetry.read", "graph.read", "repo.write:specs"}),
+    "auditor":      frozenset({"browser.read", "graph.read"}),
+    "oracle":       frozenset({"browser.read", "graph.read"}),
+    # Economist is read-only BY DESIGN, not by omission: it recommends —
+    # which tests are worth their runtime, which routes are overtested —
+    # and a recommendation is only trustworthy because the agent making it
+    # has no tool that could act on it unilaterally. An agent that
+    # analyses cost and can also delete the tests it judges wasteful is
+    # one prompt-injected route away from doing exactly that; SCOPES is
+    # the one place in this codebase no workspace rule can override (see
+    # the module docstring), so "Economist cannot write" has to be
+    # enforced here, not left to a rule an owner might configure away.
+    "economist":    frozenset({"graph.read", "repo.read"}),
 }
 
 # The defaults every workspace starts with. A workspace that configures its
