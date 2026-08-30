@@ -1,0 +1,30 @@
+[project]
+name = "plumbline"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+  "google-adk>=2.7.1",
+  "google-genai>=2.19.0",
+  "google-api-core>=2.34.0,<2.35.0",
+  "google-cloud-firestore>=2.16.0",
+  "google-cloud-pubsub>=2.21.0",
+  "google-cloud-run>=0.10.0",
+  "opentelemetry-sdk>=1.25.0",
+  "opentelemetry-exporter-gcp-trace>=1.6.0",
+  "fastapi>=0.111.0",
+  "uvicorn>=0.30.0",
+  "argon2-cffi>=23.1.0",
+  "pyotp>=2.9.0",
+  "itsdangerous>=2.2.0",
+  "playwright>=1.47.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0", "pytest-asyncio>=0.23.0", "httpx>=0.27.0", "requests>=2.32.0"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+include = ["app*", "agents*", "core*", "gateway*", "job*", "seed*"]

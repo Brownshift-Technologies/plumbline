@@ -1,0 +1,1037 @@
+<title>Plumbline</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root{
+    --brand:#1F4FD8; --brand-h:#1A43BC; --brand-w:#EEF2FE; --brand-w2:#DFE7FD;
+    --ground:#FDFCFA; --white:#fff;
+    --ink:#1A1A18; --ink2:#3C3C38; --muted:#5F5F59; --faint:#6E6E66;
+    --line:#E7E5E0; --line2:#F0EEEA; --hover:#F6F5F2;
+    --pass:#15794F; --pass-w:#E7F4EE;
+    --fail:#B8362A; --fail-w:#FBECEA;
+    --warn:#94600F; --warn-w:#FBF2E3;
+    --violet:#5B3FBF; --violet-w:#F2F0FC;
+    --r:8px; --r-lg:11px;
+    --sh:0 1px 2px rgba(26,26,24,.05);
+    --sh2:0 2px 8px rgba(26,26,24,.08);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ground);color:var(--ink);
+       font-family:'Figtree',system-ui,-apple-system,sans-serif;font-size:15px;line-height:1.5;
+       -webkit-font-smoothing:antialiased}
+  h1,h2,h3,h4{margin:0}p{margin:0}
+  a{color:inherit;text-decoration:none}
+  button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
+  svg{display:block;flex:none}
+  .n{font-variant-numeric:tabular-nums}
+  .mono{font-family:'IBM Plex Mono',monospace;font-size:12.5px}
+  [hidden]{display:none!important}
+  :focus-visible{outline:2px solid var(--brand);outline-offset:2px;border-radius:4px}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+  .icon{width:19px;height:19px;stroke:currentColor;stroke-width:1.5;
+        stroke-linecap:round;stroke-linejoin:round;fill:none}
+  .icon.s{width:15px;height:15px}
+  .icon.xs{width:13px;height:13px}
+
+  /* ---------- shell ---------- */
+  .app{display:grid;grid-template-columns:262px 1fr;min-height:100vh}
+  .side{background:var(--white);border-right:1px solid var(--line);display:flex;flex-direction:column;
+        padding:14px 0 18px;position:sticky;top:0;height:100vh}
+  .logo{display:flex;align-items:center;gap:9px;padding:2px 16px 15px}
+  .logo b{font-size:19px;font-weight:800;letter-spacing:-.022em}
+  .create{margin:0 16px 16px;display:flex;align-items:center;justify-content:center;gap:8px;
+          background:var(--brand);color:#fff;border-radius:var(--r);padding:11px 14px;
+          font-size:15px;font-weight:600;width:calc(100% - 32px);transition:background .12s}
+  .create:hover{background:var(--brand-h)}
+  .nav{padding:0 8px;display:flex;flex-direction:column;gap:1px;overflow-y:auto}
+  .nav a{display:flex;align-items:center;gap:11px;padding:8px 10px;border-radius:7px;
+         font-size:14.5px;color:var(--ink2);transition:background .1s}
+  .nav a .icon{color:var(--muted)}
+  .nav a:hover{background:var(--hover)}
+  .nav a.on{background:var(--brand-w);color:var(--brand);font-weight:600}
+  .nav a.on .icon{color:var(--brand)}
+  .nav .count{margin-left:auto;font-size:12.5px;color:var(--faint);font-variant-numeric:tabular-nums}
+  .nav a.on .count{color:var(--brand)}
+  .nav .badge{margin-left:auto;font-size:11px;font-weight:700;color:var(--muted);
+              border:1px solid var(--line);border-radius:5px;padding:1px 6px}
+  .nav-rule{height:1px;background:var(--line);margin:13px 16px}
+  .side-foot{margin-top:auto;padding:16px 16px 0;border-top:1px solid var(--line)}
+  .plan-row{display:flex;align-items:center;gap:6px;font-size:14px;color:var(--ink2)}
+  .plan-row .v{margin-left:auto;font-size:13.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .meter{margin-top:9px;height:5px;border-radius:3px;background:#EBE9E4;overflow:hidden}
+  .meter i{display:block;height:100%;border-radius:3px;background:var(--brand)}
+  .side-foot small{display:block;margin-top:8px;font-size:12.5px;color:var(--faint)}
+  .side-foot .manage{display:inline-block;margin-top:13px;font-size:13.5px;color:var(--brand);
+                     font-weight:500;text-decoration:underline}
+
+  .main{min-width:0;display:flex;flex-direction:column}
+  .topbar{display:flex;align-items:center;gap:9px;padding:10px 24px;border-bottom:1px solid var(--line);
+          background:var(--ground);position:sticky;top:0;z-index:5}
+  .ws{display:flex;align-items:center;gap:8px;padding:5px 10px;border:1px solid var(--line);
+      border-radius:7px;background:var(--white);font-size:13.5px;transition:border-color .1s}
+  .ws:hover{border-color:#D6D3CD}
+  .ws .sq{width:17px;height:17px;border-radius:4px;background:var(--brand);color:#fff;
+          font-size:10px;font-weight:700;display:grid;place-items:center}
+  .sp{flex:1}
+  .tb{display:flex;align-items:center;gap:7px;padding:6px 11px;border:1px solid var(--line);
+      border-radius:7px;background:var(--white);font-size:13.5px;color:var(--ink2);transition:border-color .1s}
+  .tb:hover{border-color:#D6D3CD}
+  .tb kbd{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--faint);
+          border:1px solid var(--line);border-radius:4px;padding:0 4px;margin-left:3px}
+  .iconbtn{width:31px;height:31px;border-radius:7px;display:grid;place-items:center;color:var(--muted);
+           transition:background .1s}
+  .iconbtn:hover{background:var(--hover)}
+  .avatar{width:29px;height:29px;border-radius:50%;background:var(--brand-w2);color:var(--brand);
+          font-size:11.5px;font-weight:700;display:grid;place-items:center}
+
+  .body{padding:0 24px 64px;max-width:1200px;width:100%}
+  .body h2{font-size:19px;font-weight:700;letter-spacing:-.018em;margin:32px 0 13px}
+  .pagehead{padding:26px 0 4px}
+  .pagehead h1{font-size:26px;font-weight:700;letter-spacing:-.022em}
+  .pagehead p{margin-top:6px;font-size:14.5px;color:var(--muted)}
+
+  /* ---------- hero ---------- */
+  .hero{position:relative;padding:56px 24px 42px;text-align:center}
+  .hero::before{content:"";position:absolute;inset:0;
+    background-image:radial-gradient(circle,#E4E1DB 1px,transparent 1px);background-size:22px 22px;
+    opacity:.55;pointer-events:none;-webkit-mask-image:linear-gradient(#000 60%,transparent);
+    mask-image:linear-gradient(#000 60%,transparent)}
+  .hero>*{position:relative}
+  .hero h1{font-size:33px;font-weight:700;letter-spacing:-.028em;text-wrap:balance}
+
+  .promptwrap{margin:26px auto 0;max-width:762px;padding:1.5px;border-radius:13px;
+              background:linear-gradient(120deg,#E7E5E0,#E7E5E0);transition:background .18s}
+  .promptwrap:focus-within{background:linear-gradient(120deg,var(--brand) 0%,#7B5BE0 55%,#D96AA8 100%);
+                           box-shadow:0 0 0 4px rgba(31,79,216,.09)}
+  .prompt{background:var(--white);border-radius:11.5px;text-align:left;overflow:hidden}
+  .prompt .ph{display:flex;align-items:center;gap:7px;padding:12px 15px 0;font-size:14.5px;font-weight:600}
+  .prompt .ph .icon{color:var(--brand)}
+  .prompt textarea{width:100%;border:0;outline:0;resize:none;padding:9px 15px 0;font:inherit;
+                   font-size:15px;color:var(--ink);background:transparent;min-height:74px}
+  .prompt textarea::placeholder{color:#8A8A82}
+  .prompt .pf{display:flex;align-items:center;gap:7px;padding:6px 11px 11px}
+  .prompt .pf .ib{width:30px;height:30px;border-radius:7px;display:grid;place-items:center;color:var(--muted)}
+  .prompt .pf .ib:hover{background:var(--hover)}
+  .prompt .pf .ib.send{background:var(--brand);color:#fff}
+  .prompt .pf .ib.send:hover{background:var(--brand-h)}
+  .disc{margin-top:11px;font-size:13px;color:var(--faint)}
+
+  /* ---------- cards ---------- */
+  .grid5{display:grid;grid-template-columns:repeat(5,1fr);gap:13px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:13px}
+  .card{background:var(--white);border:1px solid var(--line);border-radius:var(--r-lg);padding:14px;
+        display:flex;align-items:center;gap:11px;text-align:left;width:100%;
+        transition:border-color .12s,box-shadow .12s,transform .12s}
+  .card:hover{border-color:#D6D3CD;box-shadow:var(--sh2);transform:translateY(-1px)}
+  .tile{width:38px;height:38px;border-radius:9px;display:grid;place-items:center}
+  .card b{display:block;font-size:14.5px;font-weight:600}
+  .card span span{display:block;font-size:12.5px;color:var(--muted);margin-top:1px}
+
+  .panel{background:var(--white);border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden}
+  .panel>header{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)}
+  .panel>header h3{font-size:15px;font-weight:600}
+  .lnk{font-size:13.5px;color:var(--brand);font-weight:600}
+  .lnk:hover{text-decoration:underline}
+
+  .attn{background:var(--violet-w);border:1px solid #E2DDF7;border-radius:var(--r-lg)}
+  .attn-in{padding:16px 17px;display:flex;gap:13px;align-items:flex-start}
+  .attn .eyebrow{display:flex;align-items:center;gap:6px;font-size:13.5px;font-weight:600;color:var(--violet)}
+  .attn h3{margin-top:8px;font-size:17px;font-weight:600;letter-spacing:-.012em}
+  .meta{margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px;color:var(--muted)}
+  .acts{margin-top:14px;display:flex;gap:8px;flex-wrap:wrap}
+  .kebab{margin-left:auto;width:28px;height:28px;border-radius:6px;display:grid;place-items:center;color:var(--faint)}
+  .kebab:hover{background:rgba(26,26,24,.06)}
+
+  .btn{display:inline-flex;align-items:center;gap:7px;padding:8px 13px;border-radius:7px;font-size:14px;
+       font-weight:600;border:1px solid var(--line);background:var(--white);color:var(--ink2);
+       transition:border-color .12s,background .12s}
+  .btn:hover{border-color:#D6D3CD;background:#FCFBF9}
+  .btn.pri{background:var(--brand);border-color:var(--brand);color:#fff}
+  .btn.pri:hover{background:var(--brand-h);border-color:var(--brand-h)}
+  .btn.sm{padding:5px 10px;font-size:13px;font-weight:500}
+  .btn.dang{color:var(--fail);border-color:#EFD9D6}
+  .btn.dang:hover{background:var(--fail-w)}
+
+  .pill{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:20px;
+        font-size:12.5px;font-weight:600;white-space:nowrap}
+  .pill .d{width:6px;height:6px;border-radius:50%;background:currentColor}
+  .pill.fail{background:var(--fail-w);color:var(--fail)}
+  .pill.pass{background:var(--pass-w);color:var(--pass)}
+  .pill.warn{background:var(--warn-w);color:var(--warn)}
+  .pill.info{background:var(--brand-w);color:var(--brand)}
+  .pill.grey{background:#F0EEEA;color:var(--muted)}
+
+  /* ---------- table ---------- */
+  table{width:100%;border-collapse:collapse}
+  th{text-align:left;font-size:12px;font-weight:600;color:var(--faint);padding:9px 16px;
+     border-bottom:1px solid var(--line2);white-space:nowrap}
+  th button{display:inline-flex;align-items:center;gap:4px;color:inherit;font:inherit;font-weight:600}
+  th button:hover{color:var(--ink2)}
+  td{padding:12px 16px;border-bottom:1px solid var(--line2);font-size:14px;vertical-align:middle}
+  tbody tr:last-child td{border-bottom:0}
+  tbody tr{transition:background .1s}
+  tbody tr:hover{background:#FBFAF8;cursor:pointer}
+  .who{display:flex;align-items:center;gap:8px}
+  .ava{width:22px;height:22px;border-radius:50%;background:#EFEDE9;color:var(--muted);font-size:9.5px;
+       font-weight:700;display:grid;place-items:center}
+  .ava.b{background:var(--brand-w2);color:var(--brand)}
+  .pager{display:flex;align-items:center;gap:8px;padding:10px 16px;border-top:1px solid var(--line);
+         font-size:13px;color:var(--muted)}
+  .pbtn{width:28px;height:28px;border:1px solid var(--line);border-radius:6px;display:grid;
+        place-items:center;color:var(--muted)}
+  .pbtn:hover:not(:disabled){border-color:#D6D3CD;background:var(--white)}
+  .pbtn:disabled{color:#CFCCC6;cursor:default}
+
+  /* ---------- tabs ---------- */
+  .tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-top:18px}
+  .tabs button{padding:9px 13px;font-size:14px;font-weight:500;color:var(--muted);
+               border-bottom:2px solid transparent;margin-bottom:-1px}
+  .tabs button:hover{color:var(--ink2)}
+  .tabs button.on{color:var(--brand);font-weight:600;border-bottom-color:var(--brand)}
+
+  /* ---------- forms ---------- */
+  .setrow{display:grid;grid-template-columns:236px 1fr;gap:26px;padding:20px 0;border-bottom:1px solid var(--line2)}
+  .setrow:last-child{border-bottom:0}
+  .setrow h4{font-size:14.5px;font-weight:600}
+  .setrow p{margin-top:4px;font-size:13.5px;color:var(--muted);line-height:1.55}
+  .field{display:grid;gap:6px;margin-bottom:13px;max-width:370px}
+  .field label{font-size:13px;font-weight:600;color:var(--ink2)}
+  .field input{padding:9px 12px;border:1px solid var(--line);border-radius:7px;background:var(--white);
+               font:inherit;font-size:14.5px;color:var(--ink);outline:0;transition:border-color .12s,box-shadow .12s}
+  .field input:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(31,79,216,.12)}
+  .field .hint{font-size:12.5px;color:var(--faint)}
+  .toggle{width:38px;height:22px;border-radius:11px;background:var(--brand);position:relative;flex:none;
+          transition:background .15s}
+  .toggle i{position:absolute;top:2.5px;left:18px;width:17px;height:17px;border-radius:50%;background:#fff;
+            transition:left .15s;box-shadow:0 1px 2px rgba(0,0,0,.2)}
+  .toggle.off{background:#D6D3CD}
+  .toggle.off i{left:2.5px}
+
+  /* ---------- run detail ---------- */
+  .tl{display:grid}
+  .tl-row{display:grid;grid-template-columns:96px 22px 1fr auto;gap:11px;align-items:start;padding:11px 16px;
+          border-bottom:1px solid var(--line2)}
+  .tl-row:last-child{border-bottom:0}
+  .tl-row .t{font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--faint);
+             font-variant-numeric:tabular-nums;padding-top:2px}
+  .tl-row .g{position:relative;align-self:stretch}
+  .tl-row .g i{position:absolute;left:5px;top:5px;width:9px;height:9px;border-radius:50%;
+               border:2px solid var(--brand);background:#fff}
+  .tl-row .g u{position:absolute;left:9px;top:16px;bottom:-13px;width:1.5px;background:var(--line)}
+  .tl-row:last-child .g u{display:none}
+  .tl-row .c b{font-size:14px;font-weight:600}
+  .tl-row .c p{font-size:13px;color:var(--muted);margin-top:3px;line-height:1.55}
+  .diff{font-family:'IBM Plex Mono',monospace;font-size:12px;line-height:1.8;border:1px solid var(--line);
+        border-radius:var(--r);overflow:hidden;background:#FCFBF9}
+  .diff div{padding:0 13px;white-space:pre-wrap}
+  .diff .add{background:#E9F5EE;color:#12603F}
+  .diff .del{background:#FBEDEB;color:#96301F}
+  .diff .ctx{color:var(--muted)}
+  .diff .hunk{background:#F0EEEA;color:var(--faint)}
+
+  /* ---------- auth ---------- */
+  .auth{min-height:100vh;display:grid;grid-template-columns:1fr 1fr;background:var(--white)}
+  .auth-l{padding:34px 44px;display:flex;flex-direction:column;background:var(--ground);
+          border-right:1px solid var(--line);position:relative}
+  .auth-l::before{content:"";position:absolute;inset:0;
+    background-image:radial-gradient(circle,#E4E1DB 1px,transparent 1px);background-size:22px 22px;opacity:.5}
+  .auth-l>*{position:relative}
+  .auth-l h2{margin-top:auto;font-size:30px;font-weight:700;letter-spacing:-.026em;max-width:16ch}
+  .auth-l p{margin-top:13px;font-size:15px;color:var(--muted);max-width:40ch;line-height:1.6}
+  .auth-l .facts{margin-top:auto;padding-top:24px;display:grid;gap:9px}
+  .auth-l .facts div{display:flex;align-items:center;gap:9px;font-size:13.5px;color:var(--ink2)}
+  .auth-l .facts .icon{color:var(--pass)}
+  .auth-r{padding:34px 44px;display:flex;flex-direction:column;justify-content:center;align-items:center}
+  .authbox{width:100%;max-width:372px}
+  .authbox h3{font-size:22px;font-weight:700;letter-spacing:-.02em}
+  .authbox .sub{margin-top:6px;font-size:14px;color:var(--muted)}
+  .oauth{display:grid;gap:8px;margin:20px 0}
+  .oauth button{display:flex;align-items:center;justify-content:center;gap:9px;padding:9px;
+                border:1px solid var(--line);border-radius:7px;background:var(--white);
+                font-size:14.5px;font-weight:600;transition:border-color .12s}
+  .oauth button:hover{border-color:#D6D3CD;background:#FCFBF9}
+  .divider{display:flex;align-items:center;gap:12px;margin:18px 0;font-size:12.5px;color:var(--faint)}
+  .divider::before,.divider::after{content:"";flex:1;height:1px;background:var(--line)}
+  .demo{margin-top:20px;border:1px solid var(--brand-w2);background:var(--brand-w);border-radius:var(--r-lg);padding:15px}
+  .demo b{display:flex;align-items:center;gap:7px;font-size:14.5px;color:var(--brand)}
+  .demo p{margin-top:6px;font-size:13px;color:var(--ink2);line-height:1.55}
+  .demo button{margin-top:11px;width:100%;justify-content:center}
+
+  .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:var(--ink);color:#fff;
+         padding:10px 16px;border-radius:9px;font-size:14px;font-weight:500;box-shadow:var(--sh2);z-index:50;
+         display:flex;align-items:center;gap:9px}
+
+  @media(max-width:1100px){
+    .grid5{grid-template-columns:repeat(2,1fr)}
+    .grid3{grid-template-columns:1fr}
+    .app{grid-template-columns:1fr}
+    .side{display:none}
+    .auth{grid-template-columns:1fr}
+    .auth-l{display:none}
+    .setrow{grid-template-columns:1fr;gap:10px}
+  }
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="i-home" viewBox="0 0 20 20"><path d="M3.2 8.4 10 3.1l6.8 5.3v7.3a1.2 1.2 0 0 1-1.2 1.2h-3.4v-4.7H7.8v4.7H4.4a1.2 1.2 0 0 1-1.2-1.2V8.4Z"/></symbol>
+  <symbol id="i-run" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7.2"/><path d="M10 5.9v4.3l2.9 1.7"/></symbol>
+  <symbol id="i-map" viewBox="0 0 20 20"><path d="m3 6.1 4.7-2.3L12.3 6 17 3.7v10.2l-4.7 2.3-4.6-2.2L3 16.3V6.1Z"/><path d="M7.7 3.8v10.2M12.3 6v10.2"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 20 20"><path d="M10 3.2 17 15.4H3L10 3.2Z"/><path d="M10 8.3v2.9"/><circle cx="10" cy="13.2" r=".85" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 20 20"><rect x="3.2" y="3.2" width="6" height="6" rx="1.6"/><rect x="10.8" y="3.2" width="6" height="6" rx="1.6"/><rect x="3.2" y="10.8" width="6" height="6" rx="1.6"/><rect x="10.8" y="10.8" width="6" height="6" rx="1.6"/></symbol>
+  <symbol id="i-agents" viewBox="0 0 20 20"><circle cx="7.4" cy="7.1" r="2.7"/><circle cx="13.6" cy="7.1" r="2.2"/><path d="M2.9 15.9c0-2.3 2-3.9 4.5-3.9s4.5 1.6 4.5 3.9M13 12.2c2.3.1 4.1 1.6 4.1 3.7"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 20 20"><path d="M10 3 15.9 5.4v4.4c0 3.4-2.4 6.2-5.9 7.3-3.5-1.1-5.9-3.9-5.9-7.3V5.4L10 3Z"/><path d="m7.7 10 1.7 1.7 3.1-3.4"/></symbol>
+  <symbol id="i-ledger" viewBox="0 0 20 20"><rect x="3.6" y="2.9" width="12.8" height="14.2" rx="2.2"/><path d="M6.9 7h6.2M6.9 10h6.2M6.9 13h3.5"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 20 20"><path d="M4 5.4h12M4 10h12M4 14.6h12"/><circle cx="7.6" cy="5.4" r="1.9" fill="#fff"/><circle cx="12.4" cy="10" r="1.9" fill="#fff"/><circle cx="7.6" cy="14.6" r="1.9" fill="#fff"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 20 20"><path d="M10 4.2v11.6M4.2 10h11.6"/></symbol>
+  <symbol id="i-search" viewBox="0 0 20 20"><circle cx="9" cy="9" r="5.6"/><path d="m13.3 13.3 3.2 3.2"/></symbol>
+  <symbol id="i-chev-d" viewBox="0 0 20 20"><path d="m6 8.2 4 4 4-4"/></symbol>
+  <symbol id="i-chev-l" viewBox="0 0 20 20"><path d="m12 5 -5 5 5 5"/></symbol>
+  <symbol id="i-chev-r" viewBox="0 0 20 20"><path d="m8 5 5 5-5 5"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 20 20"><path d="M10 2.4 11.9 7 16.5 8.9 11.9 10.8 10 15.4 8.1 10.8 3.5 8.9 8.1 7 10 2.4Z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 20 20"><rect x="7.4" y="2.7" width="5.2" height="8.6" rx="2.6"/><path d="M4.6 9.4a5.4 5.4 0 0 0 10.8 0M10 14.8v2.5"/></symbol>
+  <symbol id="i-up" viewBox="0 0 20 20"><path d="M10 15.6V4.4M5.4 9 10 4.4 14.6 9"/></symbol>
+  <symbol id="i-check" viewBox="0 0 20 20"><path d="m4.6 10.4 3.4 3.4 7.4-7.6"/></symbol>
+  <symbol id="i-checkbox" viewBox="0 0 20 20"><rect x="3.2" y="3.2" width="13.6" height="13.6" rx="3.4"/><path d="m7.2 10.2 2 2 3.6-4"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 20 20"><rect x="3" y="4.2" width="14" height="4" rx="1.7"/><rect x="3" y="11.8" width="14" height="4" rx="1.7"/></symbol>
+  <symbol id="i-bolt" viewBox="0 0 20 20"><path d="M11.6 2.6 4.9 11h4l-.4 6.4L15.1 9h-4l.5-6.4Z"/></symbol>
+  <symbol id="i-cal" viewBox="0 0 20 20"><rect x="3.2" y="4.4" width="13.6" height="12.4" rx="2.4"/><path d="M3.2 8.2h13.6M7 2.8v3M13 2.8v3"/></symbol>
+  <symbol id="i-import" viewBox="0 0 20 20"><path d="M3.6 6.6 10 3.2l6.4 3.4L10 10 3.6 6.6Z"/><path d="m3.6 10.6 6.4 3.4 6.4-3.4"/></symbol>
+  <symbol id="i-star" viewBox="0 0 20 20"><path d="M10 2.6 12.3 7.2l5 .7-3.6 3.5.9 5-4.6-2.4L5.4 16.4l.9-5-3.6-3.5 5-.7L10 2.6Z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-filter" viewBox="0 0 20 20"><path d="M3.2 5h13.6M5.6 10h8.8M8.2 15h3.6"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 20 20"><path d="M6 8.6a4 4 0 0 1 8 0c0 3 1.3 4.2 1.3 4.2H4.7S6 11.6 6 8.6Z"/><path d="M8.6 15.4a1.6 1.6 0 0 0 2.8 0"/></symbol>
+  <symbol id="i-help" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7.2"/><path d="M8.2 8.1a1.9 1.9 0 1 1 2.5 1.8c-.5.2-.7.6-.7 1.1v.4"/><circle cx="10" cy="13.6" r=".85" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-sort" viewBox="0 0 20 20"><path d="M10 4.6v10.8M6.6 12 10 15.4 13.4 12"/></symbol>
+  <symbol id="i-back" viewBox="0 0 20 20"><path d="M16 10H4.6M9 4.6 3.6 10 9 15.4"/></symbol>
+  <symbol id="i-git" viewBox="0 0 20 20"><circle cx="6" cy="5" r="2.1"/><circle cx="6" cy="15" r="2.1"/><circle cx="14" cy="10" r="2.1"/><path d="M6 7.1v5.8M8.1 5h1.8a2 2 0 0 1 2 2v1"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 20 20"><rect x="4.2" y="8.6" width="11.6" height="8.2" rx="2.2"/><path d="M6.9 8.6V6.4a3.1 3.1 0 0 1 6.2 0v2.2"/></symbol>
+</defs></svg>
+
+<!-- ==================== SIGN IN ==================== -->
+<div class="auth" data-screen="signin">
+  <div class="auth-l">
+    <div class="logo" style="padding-left:0">
+      <svg width="20" height="24" viewBox="0 0 20 24" aria-hidden="true">
+        <line x1="10" y1="1" x2="10" y2="13" stroke="#1F4FD8" stroke-width="1.8" stroke-linecap="round"/>
+        <path d="M10 13 L15.5 18 L10 23 L4.5 18 Z" fill="#1F4FD8"/></svg>
+      <b>Plumbline</b>
+    </div>
+    <h2>The test suite you never had time to write.</h2>
+    <p>Connect a repository and Plumbline maps it, writes the behaviours, breaks them on purpose, and opens a pull request when it finds the fix. You approve everything.</p>
+    <div class="facts">
+      <div><svg class="icon s"><use href="#i-check"/></svg> SOC 2 Type II and GDPR aligned</div>
+      <div><svg class="icon s"><use href="#i-check"/></svg> No agent can merge without an approval</div>
+      <div><svg class="icon s"><use href="#i-check"/></svg> Every action in an exportable audit ledger</div>
+    </div>
+  </div>
+  <div class="auth-r">
+    <div class="authbox">
+      <h3>Sign in to Plumbline</h3>
+      <p class="sub">Welcome back. Pick up where run 4471 left off.</p>
+      <div class="oauth">
+        <button data-go="home"><svg class="icon s"><use href="#i-git"/></svg> Continue with GitHub</button>
+        <button data-go="home">Continue with Google</button>
+        <button data-go="home"><svg class="icon s"><use href="#i-lock"/></svg> Continue with Okta SSO</button>
+      </div>
+      <div class="divider">or with email</div>
+      <div class="field"><label for="em">Work email</label><input id="em" type="email" placeholder="you@company.com"></div>
+      <div class="field"><label for="pw">Password</label><input id="pw" type="password" placeholder="••••••••••••"></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin:2px 0 14px">
+        <label style="display:flex;align-items:center;gap:7px;font-size:13.5px;color:var(--muted)">
+          <input type="checkbox" style="width:auto;margin:0"> Keep me signed in</label>
+        <a href="#" class="lnk" style="font-weight:500">Forgot password?</a>
+      </div>
+      <button class="btn pri" style="width:100%;justify-content:center;padding:10px" data-go="home">Sign in</button>
+      <div class="demo">
+        <b><svg class="icon s"><use href="#i-spark"/></svg> Try it without an account</b>
+        <p>A seeded workspace with real runs, a real failure and a real proposed patch. Nothing to install, no card.</p>
+        <button class="btn pri demo-btn" data-go="home">Open the live demo</button>
+      </div>
+      <p style="margin-top:18px;font-size:13.5px;color:var(--muted);text-align:center">
+        New here? <a href="#" class="lnk">Create an account</a></p>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== APP ==================== -->
+<div class="app" data-screen="app" hidden>
+  <aside class="side">
+    <div class="logo">
+      <svg width="20" height="24" viewBox="0 0 20 24" aria-hidden="true">
+        <line x1="10" y1="1" x2="10" y2="13" stroke="#1F4FD8" stroke-width="1.8" stroke-linecap="round"/>
+        <path d="M10 13 L15.5 18 L10 23 L4.5 18 Z" fill="#1F4FD8"/></svg>
+      <b>Plumbline</b>
+    </div>
+    <button class="create" data-go="home"><svg class="icon s"><use href="#i-plus"/></svg> New run</button>
+    <nav class="nav">
+      <a href="#" data-go="home" class="on"><svg class="icon"><use href="#i-home"/></svg> Home</a>
+      <a href="#" data-go="runs"><svg class="icon"><use href="#i-run"/></svg> Runs <span class="count n">18</span></a>
+      <a href="#" data-go="surface"><svg class="icon"><use href="#i-map"/></svg> Surface map</a>
+      <a href="#" data-go="findings"><svg class="icon"><use href="#i-alert"/></svg> Findings <span class="count n">7</span></a>
+      <a href="#" data-go="behaviours"><svg class="icon"><use href="#i-grid"/></svg> Behaviours</a>
+      <div class="nav-rule"></div>
+      <a href="#" data-go="agents"><svg class="icon"><use href="#i-agents"/></svg> Agents <span class="badge">7</span></a>
+      <a href="#" data-go="policy"><svg class="icon"><use href="#i-shield"/></svg> Policy &amp; gates</a>
+      <a href="#" data-go="ledger"><svg class="icon"><use href="#i-ledger"/></svg> Audit ledger</a>
+      <a href="#" data-go="settings"><svg class="icon"><use href="#i-settings"/></svg> Settings</a>
+    </nav>
+    <div class="side-foot">
+      <div class="plan-row">Runs this month
+        <svg class="icon xs" style="color:var(--faint)"><use href="#i-help"/></svg>
+        <span class="v n">184 / 500</span></div>
+      <div class="meter"><i style="width:36.8%"></i></div>
+      <small>Resets in 12 days</small>
+      <a href="#" class="manage">Manage plan</a>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <button class="ws"><span class="sq">A</span> acme / storefront <svg class="icon s" style="color:var(--muted)"><use href="#i-chev-d"/></svg></button>
+      <span class="sp"></span>
+      <button class="tb"><svg class="icon s"><use href="#i-search"/></svg> Search <kbd>⌘K</kbd></button>
+      <button class="iconbtn" title="Notifications"><svg class="icon"><use href="#i-bell"/></svg></button>
+      <button class="iconbtn" title="Help and docs"><svg class="icon"><use href="#i-help"/></svg></button>
+      <button class="avatar" data-go="settings" title="Roger Koranteng">RK</button>
+    </div>
+
+    <!-- ---------- HOME ---------- -->
+    <section data-page="home">
+      <div class="hero">
+        <h1>Good evening, Roger. What should we put under test?</h1>
+        <div class="promptwrap">
+          <div class="prompt">
+            <div class="ph"><svg class="icon s"><use href="#i-spark"/></svg> Describe a behaviour</div>
+            <textarea placeholder="A customer who retries a slow payment should only be charged once"></textarea>
+            <div class="pf"><span class="sp"></span>
+              <button class="ib" title="Dictate"><svg class="icon s"><use href="#i-mic"/></svg></button>
+              <button class="ib send" title="Write and run this behaviour"><svg class="icon s"><use href="#i-up"/></svg></button>
+            </div>
+          </div>
+        </div>
+        <p class="disc">Plumbline writes and runs the test. It never merges anything without your approval.</p>
+      </div>
+
+      <div class="body">
+        <h2 style="margin-top:6px">Start from scratch</h2>
+        <div class="grid5">
+          <button class="card"><span class="tile" style="background:var(--brand-w)"><svg class="icon" style="color:var(--brand)"><use href="#i-checkbox"/></svg></span>
+            <span><b>Behaviour</b><span>One thing that must hold</span></span></button>
+          <button class="card"><span class="tile" style="background:var(--pass-w)"><svg class="icon" style="color:var(--pass)"><use href="#i-layers"/></svg></span>
+            <span><b>Suite</b><span>Group behaviours together</span></span></button>
+          <button class="card"><span class="tile" style="background:var(--violet-w)"><svg class="icon" style="color:var(--violet)"><use href="#i-bolt"/></svg></span>
+            <span><b>Chaos run</b><span>Break it on purpose</span></span></button>
+          <button class="card"><span class="tile" style="background:var(--warn-w)"><svg class="icon" style="color:var(--warn)"><use href="#i-cal"/></svg></span>
+            <span><b>Schedule</b><span>Run on a cadence</span></span></button>
+          <button class="card"><span class="tile" style="background:#F1EFEA"><svg class="icon" style="color:var(--muted)"><use href="#i-import"/></svg></span>
+            <span><b>Import</b><span>Bring existing Playwright</span></span></button>
+        </div>
+
+        <h2>Needs your attention</h2>
+        <div class="attn" style="margin-bottom:13px">
+          <div class="attn-in">
+            <svg class="icon" style="color:var(--violet);margin-top:2px"><use href="#i-star"/></svg>
+            <div style="flex:1">
+              <div class="eyebrow">Waiting on you since 14:06</div>
+              <h3>A retried payment charges the customer twice</h3>
+              <div class="meta">
+                <span class="pill fail"><span class="d"></span>Failing</span>
+                <span class="mono">/checkout/payment</span><span>·</span>
+                <span>Reproduced 5 of 5</span><span>·</span><span>Patch ready, 7 lines</span>
+              </div>
+              <div class="acts">
+                <button class="btn pri" data-go="run">Review patch</button>
+                <button class="btn" data-go="run">Open run 4471</button>
+                <button class="btn" data-toast="Snoozed until tomorrow at 09:00">Snooze</button>
+              </div>
+            </div>
+            <button class="kebab" title="More"><svg class="icon s" viewBox="0 0 16 16" style="stroke:none"><circle cx="8" cy="3.4" r="1.3" fill="currentColor"/><circle cx="8" cy="8" r="1.3" fill="currentColor"/><circle cx="8" cy="12.6" r="1.3" fill="currentColor"/></svg></button>
+          </div>
+        </div>
+
+        <div class="grid3">
+          <button class="card" style="display:block" data-go="findings">
+            <h4 style="font-size:14.5px;font-weight:600;line-height:1.35">Changing a password doesn't end other sessions</h4>
+            <div style="margin-top:9px;display:flex;align-items:center;gap:8px">
+              <span class="pill fail"><span class="d"></span>Failing</span><span class="mono" style="color:var(--muted)">/account/security</span></div>
+            <div style="margin-top:11px;padding-top:10px;border-top:1px solid var(--line2);font-size:12.5px;color:var(--faint)">Found by Chaos · 2 days ago</div>
+          </button>
+          <button class="card" style="display:block" data-go="findings">
+            <h4 style="font-size:14.5px;font-weight:600;line-height:1.35">Cart total drifts a cent when currency changes</h4>
+            <div style="margin-top:9px;display:flex;align-items:center;gap:8px">
+              <span class="pill warn"><span class="d"></span>Tolerance</span><span class="mono" style="color:var(--muted)">/cart</span></div>
+            <div style="margin-top:11px;padding-top:10px;border-top:1px solid var(--line2);font-size:12.5px;color:var(--faint)">Found by Runner · 3 days ago</div>
+          </button>
+          <button class="card" style="display:block" data-go="surface">
+            <h4 style="font-size:14.5px;font-weight:600;line-height:1.35">3-D Secure step-up has no behaviour written</h4>
+            <div style="margin-top:9px;display:flex;align-items:center;gap:8px">
+              <span class="pill warn"><span class="d"></span>Uncovered</span><span class="mono" style="color:var(--muted)">/checkout/3ds</span></div>
+            <div style="margin-top:11px;padding-top:10px;border-top:1px solid var(--line2);font-size:12.5px;color:var(--faint)">Mapped by Cartographer · today</div>
+          </button>
+        </div>
+
+        <h2>Recent runs</h2>
+        <div class="panel">
+          <header><h3>Last 24 hours</h3><span class="sp"></span>
+            <button class="btn sm"><svg class="icon xs"><use href="#i-filter"/></svg> Filter</button>
+            <a href="#" class="lnk" data-go="runs">View all</a></header>
+          <table>
+            <thead><tr><th style="width:74px">Run</th><th>Trigger</th><th style="width:116px">Result</th>
+              <th style="width:154px">Behaviours</th>
+              <th style="width:104px"><button>Duration <svg class="icon xs"><use href="#i-sort"/></svg></button></th>
+              <th style="width:136px">Started by</th></tr></thead>
+            <tbody>
+              <tr data-go="run"><td class="mono">4471</td><td>Pull request #2211 · retry idempotency</td>
+                <td><span class="pill fail"><span class="d"></span>1 failing</span></td>
+                <td class="n" style="color:var(--muted)">341 held · 1 failed</td>
+                <td class="n" style="color:var(--muted)">6m 41s</td>
+                <td><span class="who"><span class="ava b">SU</span>Surgeon</span></td></tr>
+              <tr data-go="run"><td class="mono">4470</td><td>Pull request #2210 · checkout nav refactor</td>
+                <td><span class="pill pass"><span class="d"></span>All held</span></td>
+                <td class="n" style="color:var(--muted)">338 held · 4 repaired</td>
+                <td class="n" style="color:var(--muted)">5m 52s</td>
+                <td><span class="who"><span class="ava">RK</span>Roger K.</span></td></tr>
+              <tr data-go="run"><td class="mono">4469</td><td>Scheduled · nightly chaos sweep</td>
+                <td><span class="pill warn"><span class="d"></span>2 unstable</span></td>
+                <td class="n" style="color:var(--muted)">340 held · 2 unstable</td>
+                <td class="n" style="color:var(--muted)">11m 08s</td>
+                <td><span class="who"><span class="ava b">CH</span>Chaos</span></td></tr>
+              <tr data-go="run"><td class="mono">4468</td><td>Push to main · bump stripe-node to 14.2</td>
+                <td><span class="pill pass"><span class="d"></span>All held</span></td>
+                <td class="n" style="color:var(--muted)">342 held</td>
+                <td class="n" style="color:var(--muted)">5m 30s</td>
+                <td><span class="who"><span class="ava">AO</span>Ama O.</span></td></tr>
+            </tbody>
+          </table>
+          <div class="pager">Showing 4 of 18 runs<span class="sp"></span>
+            <button class="pbtn" disabled><svg class="icon xs"><use href="#i-chev-l"/></svg></button>
+            <button class="pbtn"><svg class="icon xs"><use href="#i-chev-r"/></svg></button></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- RUN DETAIL ---------- -->
+    <section data-page="run" hidden>
+      <div class="body">
+        <div class="pagehead">
+          <button class="btn sm" data-go="home" style="margin-bottom:14px"><svg class="icon xs"><use href="#i-back"/></svg> Back</button>
+          <div style="display:flex;align-items:flex-start;gap:16px">
+            <div>
+              <div style="display:flex;align-items:center;gap:10px">
+                <h1>Run 4471</h1><span class="pill fail"><span class="d"></span>1 failing</span>
+              </div>
+              <p>Pull request #2211 · retry idempotency · commit <span class="mono">8f21c04</span> · finished 14:06, 22 minutes ago</p>
+            </div>
+            <span class="sp"></span>
+            <button class="btn">Replay deterministically</button>
+            <button class="btn pri" data-toast="Patch approved. Merging pull request #2211.">Approve patch</button>
+          </div>
+        </div>
+
+        <div class="attn" style="margin-top:20px">
+          <div class="attn-in">
+            <svg class="icon" style="color:var(--violet);margin-top:2px"><use href="#i-star"/></svg>
+            <div style="flex:1">
+              <div class="eyebrow">Blocked at a gate</div>
+              <h3>A retried payment charges the customer twice</h3>
+              <p style="margin-top:9px;font-size:14px;color:var(--ink2);line-height:1.6;max-width:80ch">
+                Under 240&nbsp;ms of injected latency on <span class="mono">payments-api</span>, the retry fires before the
+                idempotency key is persisted, so the provider reads the second attempt as a new charge. Chaos found it;
+                no behaviour covered a slow payment provider before today.</p>
+              <div class="meta">
+                <span class="mono">/checkout/payment</span><span>·</span>
+                <span>Seed <span class="mono">0x7f3a91c4</span></span><span>·</span>
+                <span>Reproduced 5 of 5</span><span>·</span>
+                <span>Policy <span class="mono">payments/*</span> requires a human</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <h2>What the agents did</h2>
+        <div class="panel">
+          <header><h3>Reasoning chain</h3><span class="sp"></span>
+            <span style="font-size:13px;color:var(--faint)">7 steps · 312 traces · 6m 41s</span></header>
+          <div class="tl">
+            <div class="tl-row"><span class="t">14:02:11</span><span class="g"><i></i><u></u></span>
+              <span class="c"><b>Cartographer mapped 47 routes</b><p>12 new since run 4469. <span class="mono">/checkout/3ds</span> still has no behaviour.</p></span>
+              <span class="pill grey">33s</span></div>
+            <div class="tl-row"><span class="t">14:02:44</span><span class="g"><i></i><u></u></span>
+              <span class="c"><b>Author wrote 6 behaviours for /checkout/payment</b><p>From the uncovered edges plus the acceptance criteria on the pull request.</p></span>
+              <span class="pill grey">18s</span></div>
+            <div class="tl-row"><span class="t">14:03:02</span><span class="g"><i></i><u></u></span>
+              <span class="c"><b>Healer repaired 4 selectors</b><p>The nav refactor moved the submit control. Re-anchored to roles rather than classes.</p></span>
+              <span class="pill pass">4 fixed</span></div>
+            <div class="tl-row"><span class="t">14:03:19</span><span class="g"><i></i><u></u></span>
+              <span class="c"><b>Chaos injected 240ms of latency on payments-api</b><p>Chosen because the provider's p99 is 210&nbsp;ms and nothing exercised the slow path.</p></span>
+              <span class="pill warn">48s</span></div>
+            <div class="tl-row"><span class="t">14:04:07</span><span class="g"><i></i><u></u></span>
+              <span class="c"><b>Runner saw two charges</b><p>Two <span class="mono">POST /v1/charges</span> with different idempotency keys, 30&nbsp;ms apart.</p></span>
+              <span class="pill fail">failed</span></div>
+            <div class="tl-row"><span class="t">14:05:30</span><span class="g"><i></i><u></u></span>
+              <span class="c"><b>Triager reproduced it 5 times out of 5</b><p>Not a flake. Deterministic under the same seed, so the repro is attached to the pull request.</p></span>
+              <span class="pill grey">59s</span></div>
+            <div class="tl-row"><span class="t">14:06:29</span><span class="g"><i></i><u></u></span>
+              <span class="c"><b>Surgeon opened the pull request and stopped</b><p>Policy will not let an agent merge anything under <span class="mono">payments/*</span>.</p></span>
+              <span class="pill info">at gate</span></div>
+          </div>
+        </div>
+
+        <h2>Proposed patch</h2>
+        <div class="panel">
+          <header><h3><span class="mono" style="font-size:13px">src/checkout/payment-client.ts</span></h3>
+            <span class="pill pass">+7</span><span class="pill fail">−2</span><span class="sp"></span>
+            <a href="#" class="lnk">Open on GitHub</a></header>
+          <div style="padding:14px 16px">
+            <div class="diff">
+              <div class="hunk">@@ -118,9 +118,14 @@ async function submitCharge(cart, provider) {</div>
+              <div class="ctx">   const key = idempotencyKeyFor(cart);</div>
+              <div class="del">-  void persistIdempotencyKey(key);</div>
+              <div class="del">-  return retry(() =&gt; provider.charge(cart, key), { attempts: 3 });</div>
+              <div class="add">+  await persistIdempotencyKey(key);</div>
+              <div class="add">+</div>
+              <div class="add">+  return retry(() =&gt; provider.charge(cart, key), {</div>
+              <div class="add">+    attempts: 3,</div>
+              <div class="add">+    // Reuse the persisted key on every attempt so a slow provider</div>
+              <div class="add">+    // cannot turn a retry into a second charge.</div>
+              <div class="add">+    idempotencyKey: key,</div>
+              <div class="add">+  });</div>
+              <div class="ctx"> }</div>
+            </div>
+            <p style="margin-top:12px;font-size:13.5px;color:var(--muted);line-height:1.6">
+              Verified by re-running the failing behaviour 5 times under the same seed and latency, then the full suite.
+              342 held, 0 failed. The patch reverts itself if either check fails.</p>
+            <div class="acts">
+              <button class="btn pri" data-toast="Patch approved. Merging pull request #2211.">Approve and merge</button>
+              <button class="btn">Request changes</button>
+              <button class="btn dang" data-toast="Patch rejected. The finding stays open.">Reject</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- RUNS ---------- -->
+    <section data-page="runs" hidden>
+      <div class="body">
+        <div class="pagehead" style="display:flex;align-items:flex-end;gap:16px">
+          <div><h1>Runs</h1><p>Every run against acme / storefront.</p></div>
+          <span class="sp"></span>
+          <button class="btn sm"><svg class="icon xs"><use href="#i-filter"/></svg> Filter</button>
+          <button class="btn pri sm"><svg class="icon xs"><use href="#i-plus"/></svg> New run</button>
+        </div>
+        <div class="panel" style="margin-top:18px">
+          <table>
+            <thead><tr><th style="width:74px">Run</th><th>Trigger</th><th style="width:116px">Result</th>
+              <th style="width:154px">Behaviours</th><th style="width:104px"><button>Duration <svg class="icon xs"><use href="#i-sort"/></svg></button></th>
+              <th style="width:120px">Finished</th><th style="width:136px">Started by</th></tr></thead>
+            <tbody>
+              <tr data-go="run"><td class="mono">4471</td><td>Pull request #2211 · retry idempotency</td>
+                <td><span class="pill fail"><span class="d"></span>1 failing</span></td>
+                <td class="n" style="color:var(--muted)">341 held · 1 failed</td><td class="n" style="color:var(--muted)">6m 41s</td>
+                <td style="color:var(--muted)">22 min ago</td><td><span class="who"><span class="ava b">SU</span>Surgeon</span></td></tr>
+              <tr><td class="mono">4470</td><td>Pull request #2210 · checkout nav refactor</td>
+                <td><span class="pill pass"><span class="d"></span>All held</span></td>
+                <td class="n" style="color:var(--muted)">338 held · 4 repaired</td><td class="n" style="color:var(--muted)">5m 52s</td>
+                <td style="color:var(--muted)">47 min ago</td><td><span class="who"><span class="ava">RK</span>Roger K.</span></td></tr>
+              <tr><td class="mono">4469</td><td>Scheduled · nightly chaos sweep</td>
+                <td><span class="pill warn"><span class="d"></span>2 unstable</span></td>
+                <td class="n" style="color:var(--muted)">340 held · 2 unstable</td><td class="n" style="color:var(--muted)">11m 08s</td>
+                <td style="color:var(--muted)">11 hours ago</td><td><span class="who"><span class="ava b">CH</span>Chaos</span></td></tr>
+              <tr><td class="mono">4468</td><td>Push to main · bump stripe-node to 14.2</td>
+                <td><span class="pill pass"><span class="d"></span>All held</span></td>
+                <td class="n" style="color:var(--muted)">342 held</td><td class="n" style="color:var(--muted)">5m 30s</td>
+                <td style="color:var(--muted)">Yesterday</td><td><span class="who"><span class="ava">AO</span>Ama O.</span></td></tr>
+              <tr><td class="mono">4467</td><td>Manual · smoke before release</td>
+                <td><span class="pill grey"><span class="d"></span>Cancelled</span></td>
+                <td class="n" style="color:var(--muted)">62 held · 280 skipped</td><td class="n" style="color:var(--muted)">1m 04s</td>
+                <td style="color:var(--muted)">Yesterday</td><td><span class="who"><span class="ava">RK</span>Roger K.</span></td></tr>
+            </tbody>
+          </table>
+          <div class="pager">Showing 5 of 18 runs<span class="sp"></span>
+            <button class="pbtn" disabled><svg class="icon xs"><use href="#i-chev-l"/></svg></button>
+            <button class="pbtn"><svg class="icon xs"><use href="#i-chev-r"/></svg></button></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- SURFACE ---------- -->
+    <section data-page="surface" hidden>
+      <div class="body">
+        <div class="pagehead" style="display:flex;align-items:flex-end;gap:16px">
+          <div><h1>Surface map</h1><p>47 routes found. 38 have at least one behaviour written against them.</p></div>
+          <span class="sp"></span>
+          <button class="btn sm">Re-map</button>
+          <button class="btn pri sm">Write the 9 missing</button>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 330px;gap:14px;margin-top:18px">
+          <div class="panel">
+            <header><h3>Routes by coverage</h3><span class="sp"></span>
+              <span style="font-size:13px;color:var(--faint)">Mapped today at 14:02</span></header>
+            <div style="padding:6px 16px 14px">
+              <div id="routelist"></div>
+            </div>
+          </div>
+          <div class="panel">
+            <header><h3>Summary</h3></header>
+            <div style="padding:14px 16px;display:grid;gap:12px">
+              <div style="display:flex;align-items:center;gap:10px"><span class="pill pass">24</span><span style="font-size:14px">Fully covered</span></div>
+              <div style="display:flex;align-items:center;gap:10px"><span class="pill warn">14</span><span style="font-size:14px">Partly covered</span></div>
+              <div style="display:flex;align-items:center;gap:10px"><span class="pill fail">9</span><span style="font-size:14px">No behaviour at all</span></div>
+              <div style="margin-top:6px;padding-top:13px;border-top:1px solid var(--line2);font-size:13.5px;color:var(--muted);line-height:1.6">
+                Coverage says what was measured. It is not a promise about the nine routes nobody has written a behaviour for yet.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- FINDINGS ---------- -->
+    <section data-page="findings" hidden>
+      <div class="body">
+        <div class="pagehead" style="display:flex;align-items:flex-end;gap:16px">
+          <div><h1>Findings</h1><p>7 open. Ordered by how much of the product they touch.</p></div>
+          <span class="sp"></span>
+          <button class="btn sm"><svg class="icon xs"><use href="#i-filter"/></svg> Filter</button>
+        </div>
+        <div class="panel" style="margin-top:18px">
+          <table>
+            <thead><tr><th>Finding</th><th style="width:170px">Route</th><th style="width:130px">Found by</th>
+              <th style="width:128px">Status</th><th style="width:96px">Age</th></tr></thead>
+            <tbody>
+              <tr data-go="run"><td>A retried payment charges the customer twice</td><td class="mono" style="color:var(--muted)">/checkout/payment</td>
+                <td><span class="who"><span class="ava b">CH</span>Chaos</span></td><td><span class="pill info">Patch ready</span></td><td style="color:var(--muted)">22 min</td></tr>
+              <tr><td>Changing a password doesn't end other sessions</td><td class="mono" style="color:var(--muted)">/account/security</td>
+                <td><span class="who"><span class="ava b">CH</span>Chaos</span></td><td><span class="pill fail">Triaged</span></td><td style="color:var(--muted)">2 days</td></tr>
+              <tr><td>Cart total drifts a cent when currency changes</td><td class="mono" style="color:var(--muted)">/cart</td>
+                <td><span class="who"><span class="ava b">RU</span>Runner</span></td><td><span class="pill warn">Tolerance</span></td><td style="color:var(--muted)">3 days</td></tr>
+              <tr><td>Order history paginates past the last page</td><td class="mono" style="color:var(--muted)">/account/orders</td>
+                <td><span class="who"><span class="ava b">CA</span>Cartographer</span></td><td><span class="pill warn">Needs repro</span></td><td style="color:var(--muted)">4 days</td></tr>
+              <tr><td>Admin pricing table sorts unstably</td><td class="mono" style="color:var(--muted)">/admin/pricing</td>
+                <td><span class="who"><span class="ava b">RU</span>Runner</span></td><td><span class="pill grey">Accepted</span></td><td style="color:var(--muted)">9 days</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- BEHAVIOURS (empty state) ---------- -->
+    <section data-page="behaviours" hidden>
+      <div class="body">
+        <div class="pagehead"><h1>Behaviours</h1><p>Everything Plumbline checks, written in plain English.</p></div>
+        <div class="panel" style="margin-top:18px">
+          <div style="padding:56px 24px;text-align:center;max-width:440px;margin:0 auto">
+            <div class="tile" style="background:var(--brand-w);margin:0 auto 14px;width:44px;height:44px">
+              <svg class="icon" style="color:var(--brand)"><use href="#i-checkbox"/></svg></div>
+            <h3 style="font-size:17px;font-weight:600">No filters match</h3>
+            <p style="margin-top:7px;font-size:14px;color:var(--muted);line-height:1.6">
+              342 behaviours exist for this repository, but none are tagged <span class="mono">payments</span> and owned by you.</p>
+            <div style="margin-top:16px;display:flex;gap:8px;justify-content:center">
+              <button class="btn">Clear filters</button>
+              <button class="btn pri"><svg class="icon xs"><use href="#i-plus"/></svg> New behaviour</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- AGENTS ---------- -->
+    <section data-page="agents" hidden>
+      <div class="body">
+        <div class="pagehead" style="display:flex;align-items:flex-end;gap:16px">
+          <div><h1>Agents</h1><p>Seven specialists. Each one has a scoped set of tools and nothing more.</p></div>
+          <span class="sp"></span><button class="btn sm">Pause all</button>
+        </div>
+        <div class="panel" style="margin-top:18px">
+          <table>
+            <thead><tr><th style="width:150px">Agent</th><th style="width:70px">Version</th><th>Tools it may use</th>
+              <th style="width:132px">Model</th><th style="width:78px">Queue</th><th style="width:118px">State</th></tr></thead>
+            <tbody>
+              <tr><td><b>Cartographer</b></td><td class="mono" style="color:var(--muted)">2.4.1</td>
+                <td class="mono" style="color:var(--muted)">browser.read · graph.write</td><td class="mono" style="color:var(--muted)">gemini-3.5-flash</td>
+                <td class="n" style="color:var(--muted)">0</td><td><span class="pill grey">Idle</span></td></tr>
+              <tr><td><b>Author</b></td><td class="mono" style="color:var(--muted)">3.1.0</td>
+                <td class="mono" style="color:var(--muted)">graph.read · repo.write:specs</td><td class="mono" style="color:var(--muted)">gemini-3.5-flash</td>
+                <td class="n" style="color:var(--muted)">3</td><td><span class="pill info">Working</span></td></tr>
+              <tr><td><b>Healer</b></td><td class="mono" style="color:var(--muted)">3.0.7</td>
+                <td class="mono" style="color:var(--muted)">repo.write:specs · trace.read</td><td class="mono" style="color:var(--muted)">gemini-3.5-flash</td>
+                <td class="n" style="color:var(--muted)">1</td><td><span class="pill info">Working</span></td></tr>
+              <tr><td><b>Chaos</b></td><td class="mono" style="color:var(--muted)">1.9.2</td>
+                <td class="mono" style="color:var(--muted)">net.fault · env.write:staging</td><td class="mono" style="color:var(--muted)">gemini-3.5-flash</td>
+                <td class="n" style="color:var(--muted)">0</td><td><span class="pill grey">Idle</span></td></tr>
+              <tr><td><b>Runner</b></td><td class="mono" style="color:var(--muted)">4.2.0</td>
+                <td class="mono" style="color:var(--muted)">browser.drive · artefact.write</td><td class="mono" style="color:var(--faint)">—</td>
+                <td class="n" style="color:var(--muted)">12</td><td><span class="pill info">Working</span></td></tr>
+              <tr><td><b>Triager</b></td><td class="mono" style="color:var(--muted)">2.8.3</td>
+                <td class="mono" style="color:var(--muted)">trace.read · repo.read</td><td class="mono" style="color:var(--muted)">gemini-3.5-flash</td>
+                <td class="n" style="color:var(--muted)">0</td><td><span class="pill grey">Idle</span></td></tr>
+              <tr data-go="run"><td><b>Surgeon</b></td><td class="mono" style="color:var(--muted)">1.4.6</td>
+                <td class="mono" style="color:var(--muted)">repo.write:src · pr.open</td><td class="mono" style="color:var(--muted)">gemini-3.5-flash</td>
+                <td class="n" style="color:var(--muted)">1</td><td><span class="pill warn">At a gate</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- POLICY ---------- -->
+    <section data-page="policy" hidden>
+      <div class="body">
+        <div class="pagehead"><h1>Policy &amp; gates</h1><p>What each agent is allowed to touch, and where a human has to sign.</p></div>
+        <div class="panel" style="margin-top:18px">
+          <header><h3>Gate decisions today</h3><span class="sp"></span><span style="font-size:13px;color:var(--faint)">3 blocked</span></header>
+          <table>
+            <thead><tr><th style="width:96px">Time</th><th style="width:132px">Agent</th><th>Call</th>
+              <th style="width:190px">Rule</th><th style="width:112px">Decision</th></tr></thead>
+            <tbody>
+              <tr><td class="mono" style="color:var(--muted)">14:06</td><td>Surgeon</td>
+                <td class="mono" style="color:var(--muted)">pr.merge storefront#2211</td><td class="mono" style="color:var(--muted)">payments/* → human</td>
+                <td><span class="pill fail">Blocked</span></td></tr>
+              <tr><td class="mono" style="color:var(--muted)">13:48</td><td>Chaos</td>
+                <td class="mono" style="color:var(--muted)">env.write prod-eu-west-1</td><td class="mono" style="color:var(--muted)">staging only</td>
+                <td><span class="pill fail">Blocked</span></td></tr>
+              <tr><td class="mono" style="color:var(--muted)">13:12</td><td>Triager</td>
+                <td class="mono" style="color:var(--muted)">artefact.read har/4469</td><td class="mono" style="color:var(--muted)">redact card numbers</td>
+                <td><span class="pill warn">Redacted</span></td></tr>
+              <tr><td class="mono" style="color:var(--muted)">11:30</td><td>Author</td>
+                <td class="mono" style="color:var(--muted)">repo.write specs/checkout/*</td><td class="mono" style="color:var(--muted)">within scope</td>
+                <td><span class="pill pass">Allowed</span></td></tr>
+              <tr><td class="mono" style="color:var(--muted)">09:04</td><td>Cartographer</td>
+                <td class="mono" style="color:var(--muted)">browser.read staging</td><td class="mono" style="color:var(--muted)">injection scan</td>
+                <td><span class="pill fail">Blocked</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- LEDGER ---------- -->
+    <section data-page="ledger" hidden>
+      <div class="body">
+        <div class="pagehead" style="display:flex;align-items:flex-end;gap:16px">
+          <div><h1>Audit ledger</h1><p>Append-only. Nothing here can be edited or deleted, including by an owner.</p></div>
+          <span class="sp"></span><button class="btn sm" data-toast="Exporting 4,812 entries as CSV">Export</button>
+        </div>
+        <div class="panel" style="margin-top:18px">
+          <table>
+            <thead><tr><th style="width:150px">When</th><th style="width:140px">Who</th><th>What</th><th style="width:180px">Signature</th></tr></thead>
+            <tbody>
+              <tr><td style="color:var(--muted)">Today 14:06:29</td><td><span class="who"><span class="ava b">SU</span>Surgeon</span></td>
+                <td>Opened pull request #2211 with a 7-line patch</td><td class="mono" style="color:var(--faint)">a41f…9c02</td></tr>
+              <tr><td style="color:var(--muted)">Today 14:05:30</td><td><span class="who"><span class="ava b">TR</span>Triager</span></td>
+                <td>Reproduced the payment failure 5 times</td><td class="mono" style="color:var(--faint)">7b8e…31da</td></tr>
+              <tr><td style="color:var(--muted)">Today 14:03:19</td><td><span class="who"><span class="ava b">CH</span>Chaos</span></td>
+                <td>Injected 240ms latency on payments-api in staging</td><td class="mono" style="color:var(--faint)">02cc…8f47</td></tr>
+              <tr><td style="color:var(--muted)">Today 09:14:02</td><td><span class="who"><span class="ava">RK</span>Roger K.</span></td>
+                <td>Changed gate rule for payments/* to require an owner</td><td class="mono" style="color:var(--faint)">de19…44b1</td></tr>
+              <tr><td style="color:var(--muted)">Yesterday 22:14</td><td><span class="who"><span class="ava">AO</span>Ama O.</span></td>
+                <td>Approved and merged pull request #2208</td><td class="mono" style="color:var(--faint)">5f30…7ee9</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- SETTINGS ---------- -->
+    <section data-page="settings" hidden>
+      <div class="body" style="max-width:940px">
+        <div class="pagehead"><h1>Settings</h1><p>Your account and this workspace.</p></div>
+        <div class="tabs">
+          <button class="on" data-tab="profile">Profile</button>
+          <button data-tab="security">Security</button>
+          <button data-tab="members">Members</button>
+          <button data-tab="billing">Billing</button>
+        </div>
+
+        <div data-tabpane="profile">
+          <div class="setrow">
+            <div><h4>Photo</h4><p>Shown beside your approvals in the audit ledger.</p></div>
+            <div style="display:flex;gap:11px;align-items:center">
+              <span class="avatar" style="width:54px;height:54px;font-size:17px">RK</span>
+              <button class="btn">Upload</button><button class="btn">Remove</button></div>
+          </div>
+          <div class="setrow">
+            <div><h4>Name</h4><p>How you appear to your team.</p></div>
+            <div class="field" style="margin:0"><input type="text" value="Roger Koranteng"></div>
+          </div>
+          <div class="setrow">
+            <div><h4>Work email</h4><p>Used to sign in and to send approval requests.</p></div>
+            <div><div class="field" style="margin-bottom:8px"><input type="email" value="roger@acme.com"></div>
+              <span class="pill pass"><svg class="icon xs"><use href="#i-check"/></svg> Verified</span></div>
+          </div>
+          <div class="setrow">
+            <div><h4>Role</h4><p>Only owners can change gate rules or approve a patch under <span class="mono">payments/*</span>.</p></div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <span class="pill info">Owner</span>
+              <span style="font-size:13.5px;color:var(--muted)">Granted by Ama O. on 3 February 2026</span></div>
+          </div>
+          <div style="display:flex;gap:9px;padding:20px 0">
+            <button class="btn pri" data-toast="Profile saved">Save changes</button>
+            <button class="btn">Discard</button></div>
+        </div>
+
+        <div data-tabpane="security" hidden>
+          <div class="setrow">
+            <div><h4>Change password</h4><p>You stay signed in here and are signed out everywhere else.</p></div>
+            <div>
+              <div class="field"><label for="cp">Current password</label><input id="cp" type="password" placeholder="••••••••••••"></div>
+              <div class="field"><label for="np">New password</label><input id="np" type="password" placeholder="At least 12 characters">
+                <span class="hint">Use a passphrase. Length beats symbols.</span></div>
+              <div class="field"><label for="nc">Confirm new password</label><input id="nc" type="password" placeholder="Repeat the new password"></div>
+              <button class="btn pri" data-toast="Password updated. Other sessions signed out.">Update password</button>
+            </div>
+          </div>
+          <div class="setrow">
+            <div><h4>Two-factor authentication</h4><p>Required for anyone who can approve a patch.</p></div>
+            <div style="display:flex;gap:13px;align-items:center">
+              <button class="toggle" data-toggle aria-pressed="true"><i></i></button>
+              <span style="font-size:13.5px;color:var(--muted)">Authenticator app, added 12 March 2026</span></div>
+          </div>
+          <div class="setrow">
+            <div><h4>Active sessions</h4><p>Sign out anywhere you don't recognise.</p></div>
+            <div class="panel">
+              <table>
+                <tbody>
+                  <tr><td>Chrome on Linux <span class="pill pass" style="margin-left:7px">This device</span>
+                      <div style="font-size:12.5px;color:var(--faint);margin-top:3px">Accra, Ghana · active now</div></td><td style="width:90px"></td></tr>
+                  <tr><td>Safari on iPhone
+                      <div style="font-size:12.5px;color:var(--faint);margin-top:3px">Accra, Ghana · 2 hours ago</div></td>
+                    <td style="width:90px"><button class="btn sm" data-toast="Signed out of Safari on iPhone">Sign out</button></td></tr>
+                  <tr><td>Firefox on macOS
+                      <div style="font-size:12.5px;color:var(--faint);margin-top:3px">London, United Kingdom · 3 days ago</div></td>
+                    <td style="width:90px"><button class="btn sm" data-toast="Signed out of Firefox on macOS">Sign out</button></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="setrow">
+            <div><h4>Sign out</h4><p>End this session on this device.</p></div>
+            <div><button class="btn dang" data-go="signin">Sign out of Plumbline</button></div>
+          </div>
+        </div>
+
+        <div data-tabpane="members" hidden>
+          <div style="display:flex;align-items:center;gap:12px;padding:20px 0 14px">
+            <div><h4 style="font-size:15px;font-weight:600">3 members</h4>
+              <p style="margin-top:3px;font-size:13.5px;color:var(--muted)">Two seats left on your plan.</p></div>
+            <span class="sp"></span><button class="btn pri sm"><svg class="icon xs"><use href="#i-plus"/></svg> Invite</button>
+          </div>
+          <div class="panel">
+            <table>
+              <thead><tr><th>Member</th><th style="width:150px">Role</th><th style="width:150px">Last active</th><th style="width:60px"></th></tr></thead>
+              <tbody>
+                <tr><td><span class="who"><span class="ava b">RK</span><span><b style="font-weight:600">Roger Koranteng</b>
+                    <div style="font-size:12.5px;color:var(--faint)">roger@acme.com</div></span></span></td>
+                  <td><span class="pill info">Owner</span></td><td style="color:var(--muted)">Now</td>
+                  <td><button class="kebab"><svg class="icon s" viewBox="0 0 16 16" style="stroke:none"><circle cx="8" cy="3.4" r="1.3" fill="currentColor"/><circle cx="8" cy="8" r="1.3" fill="currentColor"/><circle cx="8" cy="12.6" r="1.3" fill="currentColor"/></svg></button></td></tr>
+                <tr><td><span class="who"><span class="ava">AO</span><span><b style="font-weight:600">Ama Owusu</b>
+                    <div style="font-size:12.5px;color:var(--faint)">ama@acme.com</div></span></span></td>
+                  <td><span class="pill grey">Approver</span></td><td style="color:var(--muted)">Yesterday</td>
+                  <td><button class="kebab"><svg class="icon s" viewBox="0 0 16 16" style="stroke:none"><circle cx="8" cy="3.4" r="1.3" fill="currentColor"/><circle cx="8" cy="8" r="1.3" fill="currentColor"/><circle cx="8" cy="12.6" r="1.3" fill="currentColor"/></svg></button></td></tr>
+                <tr><td><span class="who"><span class="ava">DM</span><span><b style="font-weight:600">Daniel Mensah</b>
+                    <div style="font-size:12.5px;color:var(--faint)">daniel@acme.com</div></span></span></td>
+                  <td><span class="pill grey">Read only</span></td><td style="color:var(--muted)">5 days ago</td>
+                  <td><button class="kebab"><svg class="icon s" viewBox="0 0 16 16" style="stroke:none"><circle cx="8" cy="3.4" r="1.3" fill="currentColor"/><circle cx="8" cy="8" r="1.3" fill="currentColor"/><circle cx="8" cy="12.6" r="1.3" fill="currentColor"/></svg></button></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div data-tabpane="billing" hidden>
+          <div class="setrow">
+            <div><h4>Plan</h4><p>Team, billed monthly. Renews 30 September 2026.</p></div>
+            <div>
+              <div style="display:flex;align-items:baseline;gap:9px">
+                <span style="font-size:26px;font-weight:700;letter-spacing:-.02em">$240</span>
+                <span style="font-size:14px;color:var(--muted)">per month</span></div>
+              <p style="margin-top:7px;font-size:13.5px;color:var(--muted)">500 runs, 5 seats, unlimited behaviours.</p>
+              <div style="margin-top:13px;display:flex;gap:8px"><button class="btn">Change plan</button>
+                <button class="btn">Billing history</button></div>
+            </div>
+          </div>
+          <div class="setrow">
+            <div><h4>Usage this month</h4><p>Resets on the 12th.</p></div>
+            <div style="max-width:370px">
+              <div class="plan-row" style="font-size:14px">Runs <span class="v n">184 / 500</span></div>
+              <div class="meter"><i style="width:36.8%"></i></div>
+              <div class="plan-row" style="font-size:14px;margin-top:16px">Seats <span class="v n">3 / 5</span></div>
+              <div class="meter"><i style="width:60%"></i></div>
+            </div>
+          </div>
+          <div class="setrow">
+            <div><h4>Payment method</h4><p>Charged automatically on renewal.</p></div>
+            <div style="display:flex;align-items:center;gap:11px">
+              <span class="mono" style="color:var(--muted)">Visa ending 4242 · expires 11/28</span>
+              <button class="btn sm">Update</button></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<script>
+(function(){
+  var routes=[["/",100],["/catalog",96],["/catalog/:sku",88],["/cart",84],["/cart/promo",61],
+    ["/checkout",72],["/checkout/payment",58],["/checkout/review",31],["/checkout/3ds",0],
+    ["/checkout/invoice",0],["/account",67],["/account/orders",38],["/account/security",22],
+    ["/auth/login",92],["/auth/reset",52],["/admin/pricing",44],["/admin/pricing/bulk",8]];
+  var el=document.getElementById("routelist");
+  if(el){
+    el.innerHTML=routes.map(function(r){
+      var pc=r[1], col = pc===0?"var(--fail)" : pc<65?"var(--warn)" : "var(--pass)";
+      return '<div style="display:grid;grid-template-columns:1fr 150px 52px;gap:14px;align-items:center;'+
+        'padding:9px 0;border-bottom:1px solid var(--line2)">'+
+        '<code class="mono">'+r[0]+'</code>'+
+        '<span style="height:6px;border-radius:3px;background:#EDEBE7;position:relative;overflow:hidden">'+
+        '<i style="position:absolute;inset:0 auto 0 0;width:'+Math.max(pc,2)+'%;background:'+col+';border-radius:3px"></i></span>'+
+        '<span class="mono n" style="text-align:right;color:var(--muted)">'+pc+'%</span></div>';
+    }).join("");
+  }
+
+  function screen(name){
+    document.querySelectorAll("[data-screen]").forEach(function(s){ s.hidden = s.dataset.screen!==name; });
+    window.scrollTo(0,0);
+  }
+  function page(name){
+    document.querySelectorAll("[data-page]").forEach(function(p){ p.hidden = p.dataset.page!==name; });
+    document.querySelectorAll(".nav a").forEach(function(a){
+      a.classList.toggle("on", a.dataset.go===name);
+    });
+    window.scrollTo(0,0);
+  }
+  function toast(msg){
+    var old=document.querySelector(".toast"); if(old) old.remove();
+    var t=document.createElement("div"); t.className="toast";
+    t.innerHTML='<svg class="icon s" style="stroke:currentColor;fill:none"><use href="#i-check"/></svg>'+msg;
+    document.body.appendChild(t);
+    setTimeout(function(){ t.remove(); },2600);
+  }
+
+  document.addEventListener("click",function(e){
+    var t=e.target.closest("[data-toast]");
+    if(t){ toast(t.dataset.toast); e.preventDefault(); return; }
+
+    var tog=e.target.closest("[data-toggle]");
+    if(tog){ var on=tog.getAttribute("aria-pressed")==="true";
+      tog.setAttribute("aria-pressed", String(!on)); tog.classList.toggle("off", on); e.preventDefault(); return; }
+
+    var tab=e.target.closest("[data-tab]");
+    if(tab){
+      tab.parentElement.querySelectorAll("button").forEach(function(b){ b.classList.toggle("on", b===tab); });
+      document.querySelectorAll("[data-tabpane]").forEach(function(p){ p.hidden = p.dataset.tabpane!==tab.dataset.tab; });
+      e.preventDefault(); return;
+    }
+
+    var g=e.target.closest("[data-go]");
+    if(g){
+      var to=g.dataset.go;
+      if(to==="signin"){ screen("signin"); }
+      else { screen("app"); page(to); }
+      e.preventDefault();
+    }
+  });
+})();
+</script>
