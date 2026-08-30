@@ -83,6 +83,42 @@ _PHONE = re.compile(
     r"(?<!\d)(?:\+?1[-. ]?)?(?:\(\d{3}\)[-. ]?|\d{3}[-. ]?)\d{3}[-. ]?\d{4}(?!\d)"
 )
 
+# A bare 13-19 digit-run regex is not enough: order numbers, trace ids and
+# timestamps are long digit runs too, and Plumbline's checkout-flow traces
+# and HARs are full of them. Redacting a non-card digit run would corrupt
+# the exact artefact a person needs in order to read a failure. `_PAN`
+# candidates every digit run in that length range (allowing space/hyphen
+# grouping, the way a PAN is usually written or logged), and `_redact_pan`
+# only claims one that also passes a Luhn check -- the checksum every real
+# card number satisfies and an arbitrary digit run passes only by chance
+# (roughly 1 in 10). This is the same "narrow claim before a wider one can
+# misread it" ordering _EMAIL already uses against the number patterns:
+# `_redact_pan` runs first in `redact_pii`, before SSN and phone, so a
+# 16-digit card is claimed whole before the SSN pattern can carve a false
+# positive out of its middle.
+_PAN = re.compile(r"(?<!\d)(?:\d[ -]?){12,18}\d(?!\d)")
+
+
+def _luhn_ok(digits: str) -> bool:
+    total, alt = 0, False
+    for ch in reversed(digits):
+        d = ord(ch) - 48
+        if alt:
+            d *= 2
+            if d > 9:
+                d -= 9
+        total += d
+        alt = not alt
+    return total % 10 == 0
+
+
+def _redact_pan(text: str) -> str:
+    def swap(m):
+        digits = re.sub(r"[ -]", "", m.group(0))
+        return "[CARD]" if 13 <= len(digits) <= 19 and _luhn_ok(digits) else m.group(0)
+
+    return _PAN.sub(swap, text)
+
 _OVERRIDE_PATTERNS = [
     re.compile(r"ignore\s+(all\s+)?previous\s+instructions", re.I),
     re.compile(r"disregard\s+(all\s+)?(prior|previous)\s+", re.I),
@@ -101,13 +137,20 @@ def redact_pii(text: str) -> str:
     # Email is matched first because the number patterns would otherwise
     # consume an email's local part and leave the domain behind:
     # "415-555-0132@example.com" would persist as "[PHONE]@example.com".
-    # SSN then runs before phone. Neither can claim the other's span (see the
-    # pattern comment above), but in a run of several adjacent digit groups
-    # they partition it differently depending on which matches first:
+    # PAN runs next, before SSN and phone, for the same reason: a 16-digit
+    # card number is also a run of digits an SSN or phone pattern could
+    # carve a false positive out of the middle of ("4242 4242 4242 4242"
+    # contains a valid-looking 3-2-4 SSN grouping at "242 42 4242"). Once
+    # PAN has claimed and replaced the whole run with "[CARD]", there is
+    # nothing left for SSN or phone to misread. SSN then runs before phone.
+    # Neither of those two can claim the other's span (see the pattern
+    # comment above), but in a run of several adjacent digit groups they
+    # partition it differently depending on which matches first:
     # "546 742173 6614" redacts to "[SSN] 6614" in this order, and to
-    # "546 [PHONE]" if the two .sub() calls are swapped. SSN goes first so the
-    # more sensitive reading wins.
+    # "546 [PHONE]" if the two .sub() calls are swapped. SSN goes first so
+    # the more sensitive reading wins.
     text = _EMAIL.sub("[EMAIL]", text)
+    text = _redact_pan(text)
     text = _SSN.sub("[SSN]", text)
     text = _PHONE.sub("[PHONE]", text)
     return text

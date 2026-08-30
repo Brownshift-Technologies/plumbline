@@ -1,3 +1,5 @@
+import time as time_module
+
 import core.fakes as fakes
 from gateway.ledger import Ledger
 from app.repo import Repo
@@ -271,3 +273,51 @@ def test_concurrent_appends_to_one_workspace_do_not_fork_the_chain():
     assert [e["actor"] for e in entries] == ["b", "a"]  # b's commit landed first
     assert entries[1]["prev"] == entries[0]["signature"]
     assert lg_a.verify("ws1") is True
+
+
+# --- Step 0a: timestamp must not drift on retry ---------------------------
+
+
+def test_the_recorded_time_does_not_drift_across_a_retry(monkeypatch):
+    """A contended append must record when the caller acted, not which
+    attempt won. Interleave a competing writer, then assert the retried
+    entry's `at` matches the clock reading taken before the first attempt.
+
+    Same interleaving trick as
+    test_concurrent_appends_to_one_workspace_do_not_fork_the_chain above:
+    writer B's whole append runs to completion from inside writer A's first
+    head read, forcing A's commit to abort (the head version A read is now
+    stale) and the decorator to re-run A's `_append` closure. A ticking fake
+    clock means attempt 1 and the retry would disagree on `at` if the
+    timestamp were captured inside that closure instead of once, up front,
+    in `append` itself -- which is exactly the bug Step 0a fixes.
+    """
+    fake = FakeFirestore()
+    lg_a = Ledger(Repo(_config(), client=fake))
+    lg_b = Ledger(Repo(_config(), client=fake))
+
+    ticks = iter([100.0, 200.0, 300.0, 400.0, 500.0])
+    monkeypatch.setattr(time_module, "time", lambda: next(ticks))
+
+    original_get = fakes.FakeDoc.get
+    interleaved = []
+
+    def get_then_let_the_other_writer_in(self, transaction=None):
+        snapshot = original_get(self, transaction=transaction)
+        if self._path == "plumbline_ledger_head/ws1" and not interleaved:
+            interleaved.append(True)
+            lg_b.append("ws1", "b", "race.b", {})
+        return snapshot
+
+    monkeypatch.setattr(fakes.FakeDoc, "get", get_then_let_the_other_writer_in)
+
+    lg_a.append("ws1", "a", "race.a", {})
+
+    assert interleaved == [True], "the interleaving never happened"
+    entries = {e["actor"]: e for e in lg_a.entries("ws1")}
+    # b's append (the only clock read besides a's own first one) consumed
+    # the second tick; a's retried entry must still carry the FIRST tick,
+    # read before a's transaction ever began -- not a third or later tick
+    # from whichever attempt happened to be the one that committed.
+    assert entries["b"]["at"] == 200.0
+    assert entries["a"]["at"] == 100.0

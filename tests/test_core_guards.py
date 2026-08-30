@@ -221,3 +221,36 @@ def test_over_limit_domain_with_no_reachable_dot_escapes_entirely():
     # else in redact_pii claims that span.
     text = "sam@" + "d" * 300 + ".com"
     assert redact_pii(text) == text
+
+
+# --- Step 0: card numbers (PANs) ----------------------------------------
+
+
+def test_a_card_number_is_redacted():
+    assert "[CARD]" in redact_pii("charged 4242 4242 4242 4242 today")
+
+
+def test_a_card_number_without_spaces_is_redacted():
+    assert "[CARD]" in redact_pii("pan=4242424242424242")
+
+
+def test_a_hyphenated_card_number_is_redacted():
+    assert "[CARD]" in redact_pii("4000-0566-5566-5556")
+
+
+def test_a_long_digit_run_that_fails_luhn_is_left_alone():
+    out = redact_pii("order 1234567890123456 shipped")
+    assert "1234567890123456" in out, "a non-card digit run must survive"
+
+
+def test_a_trace_id_is_not_mistaken_for_a_card():
+    tid = "00000000000000000000000000000001"
+    assert tid in redact_pii(f"trace {tid}")
+
+
+def test_a_card_is_claimed_before_the_ssn_pattern_can_carve_it_up():
+    assert "[SSN]" not in redact_pii("4242 4242 4242 4242")
+
+
+def test_an_ssn_still_redacts_on_its_own():
+    assert "[SSN]" in redact_pii("ssn 123-45-6789")

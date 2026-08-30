@@ -33,6 +33,13 @@ class Workspace:
     runs_used: int = 0
     policy_version: int = 14
     is_demo: bool = False
+    # Tenant-configurable gate rules (see gateway/policy.py's module
+    # docstring for the tool-scope/gate-rule split). An empty list is
+    # deliberately NOT distinguished here from "never configured" -- see
+    # Gateway._rules_for in gateway/gateway.py, which treats both the same
+    # way (falls back to DEFAULT_RULES) so a workspace can never end up
+    # unconstrained just because nobody has set gate_rules yet.
+    gate_rules: tuple[dict, ...] = ()
 
 
 @dataclass(frozen=True)

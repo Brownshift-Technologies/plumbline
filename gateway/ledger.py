@@ -81,6 +81,18 @@ class Ledger:
         redacted_action = _redact(action)
         redacted_detail = _redact(detail)
 
+        # Captured once, before the transactional closure, and closed over
+        # below -- NOT read again inside `_append`. Under contention the
+        # decorator re-runs `_append` against the head the winner just wrote
+        # (see the comment there), and if `at` were read inside that closure
+        # each retry would stamp whichever wall-clock moment its own attempt
+        # happened to run at, rather than the moment the caller actually
+        # called `append`. This ledger is the audit-of-record: *when*
+        # something happened is part of what it certifies, and nothing in
+        # the signed payload would distinguish attempt 1's clock from
+        # attempt 3's -- the skew would be silent.
+        at = time.time()
+
         head_ref = self._repo.store.doc("ledger_head", workspace_id)
         entry_id = uuid.uuid4().hex
         entry_ref = self._repo.store.doc("ledger", entry_id)
@@ -104,7 +116,7 @@ class Ledger:
                 "action": redacted_action,
                 "detail": redacted_detail,
                 "seq": seq,
-                "at": time.time(),
+                "at": at,
             }
             signature = self._sign(prev, payload)
             entry = {**payload, "id": entry_id, "prev": prev, "signature": signature}
