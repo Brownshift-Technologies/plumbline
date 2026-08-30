@@ -8,6 +8,7 @@ handing it to Store. Callers never see a raw Firestore dict.
 import time
 
 from app.models import (
+    Artefact,
     Behaviour,
     Finding,
     Incident,
@@ -242,6 +243,27 @@ class Repo:
     def specs_for_workspace(self, workspace_id: str) -> dict[str, str]:
         rows = self._store.query("specs", "workspace_id", "==", workspace_id)
         return {r["path"]: r["content"] for r in rows}
+
+    # artefacts ----------------------------------------------------------
+    #
+    # Added for Task 12a (Runner). See `Artefact`'s own docstring in
+    # app/models.py for why this gets a typed dataclass where `specs` above
+    # deliberately does not, and for why `id` is a composite key rather
+    # than a random uuid.
+    def put_artefact(self, a: Artefact) -> None:
+        self._store.put("artefacts", a.id, to_dict(a))
+
+    def artefact_count(self, workspace_id: str | None = None) -> int:
+        """How many artefacts exist -- scoped to `workspace_id` when given,
+        or the whole store when not. The no-argument form exists because a
+        Runner test builds one workspace per context (see
+        `tests/agent_fixtures.py`'s `make_ctx`) and wants "how many did
+        this run write" without also having to know or repeat the
+        workspace id it just used to build that same context.
+        """
+        if workspace_id is None:
+            return len(self._store.all("artefacts"))
+        return len(self._store.query("artefacts", "workspace_id", "==", workspace_id))
 
     # sessions ------------------------------------------------------------
     def put_session(self, s: Session) -> None:

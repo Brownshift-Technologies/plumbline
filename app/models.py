@@ -220,5 +220,46 @@ class Incident:
     status: str = "open"
 
 
+@dataclass(frozen=True)
+class Artefact:
+    """One captured file (video, Playwright trace, HAR, or console log)
+    from one failing spec in one Runner run (Task 12a). Unlike `specs`
+    (deliberately a bare dict in `Repo` -- see that method's docstring for
+    why arbitrary generated source has no fixed shape to validate), an
+    artefact's shape IS fixed and small, so it gets the same frozen
+    dataclass treatment every other Firestore document in this file gets.
+
+    `id` is a composite key -- `run_id`, `spec_path`, and `kind` joined
+    together (see `agents/runner.py`'s `_artefact_id`) -- deliberately NOT
+    a random uuid. Two failing specs in the same run each write a "video"
+    kind; without spec_path baked into the id, both writes would collide on
+    the same document and the second would silently overwrite the first.
+    Baking in `run_id` too means two runs of the same suite (a re-run,
+    Triager's five-times-under-one-seed reproduction) never collide with
+    each other's artefacts either. Deterministic and idempotent: re-running
+    the same failing spec in the same run and writing the same kind again
+    overwrites its own prior artefact rather than accumulating a duplicate.
+
+    `content` is a plain string standing in for what would be binary or
+    structured data in production (an actual video, a Playwright trace
+    zip, a HAR JSON blob, a console log). Firestore documents cap at 1 MiB
+    and are not where real binary artefacts belong at scale -- this field
+    is deliberately synthetic, matching how far this task's own execution
+    primitive (`agents/browser.py`'s `FakeBrowser.run_spec`) goes: capturing
+    and pointing at the REAL files a real Chromium run would produce is
+    `PlaywrightDriver`'s job once someone wires it up (that class's
+    `run_spec` still raises `NotImplementedError` -- see its docstring),
+    not this task's.
+    """
+
+    id: str
+    workspace_id: str
+    run_id: str
+    spec_path: str
+    kind: str
+    content: str = ""
+    created_at: float = field(default_factory=time.time)
+
+
 def to_dict(obj) -> dict:
     return asdict(obj)

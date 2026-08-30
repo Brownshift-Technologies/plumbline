@@ -104,6 +104,19 @@ class Store:
         results = collection_ref.where(filter=FieldFilter(field, op, value)).stream()
         return [doc.to_dict() for doc in results]
 
+    def all(self, collection: str) -> list[dict]:
+        """Every document in `collection`, unfiltered -- `query()` with no
+        `where()` clause at all rather than a degenerate filter, because
+        there is no field guaranteed present on every row to filter on
+        trivially-true. Added for `Repo.artefact_count()` (Task 12a), whose
+        whole-run "how many artefacts did this run write in total" answer
+        has no single field value to scope a `query()` call to. Same cost
+        profile as any other unindexed collection scan in this module --
+        fine at this product's scale, not a pattern to reach for on a
+        collection meant to grow unbounded.
+        """
+        return [doc.to_dict() for doc in self._client.collection(self._name(collection)).stream()]
+
     def doc(self, collection: str, doc_id: str):
         """A raw (prefixed) document reference for a caller that needs
         transactional get/set across more than one document -- `put`/`get`
