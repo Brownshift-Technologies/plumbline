@@ -13,6 +13,15 @@ export interface CurrentUser {
   is_demo: boolean;
   workspace_id: string;
   role: Role;
+  /**
+   * Whether this user has a CONFIRMED (not merely pending) TOTP secret --
+   * see app/models.py's User.totp_secret vs totp_pending_secret. Not part
+   * of Task 8a's documented `/me` response; the client treats it as
+   * "unknown" (undefined) rather than "false" when absent, so it only
+   * blocks Approve on a positive signal, never on a field the backend
+   * simply hasn't added yet. See RunDetail's gate-disabled logic.
+   */
+  totp_enabled?: boolean;
 }
 
 export interface Run {
