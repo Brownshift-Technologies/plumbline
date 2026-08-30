@@ -219,6 +219,30 @@ class Repo:
     def behaviours_for_workspace(self, wid: str) -> list[Behaviour]:
         return [Behaviour(**r) for r in self._store.query("behaviours", "workspace_id", "==", wid)]
 
+    # spec files -------------------------------------------------------
+    #
+    # Added for Tasks 11a/11b. A spec is Playwright *source text*, not one
+    # of the frozen dataclasses in app/models.py -- there is no fixed shape
+    # to validate it against, and Author's whole job is producing arbitrary
+    # generated source, so a plain path->content mapping is the right
+    # amount of structure (none). Keyed by (workspace_id, path) rather than
+    # path alone, the same tenancy discipline every other collection here
+    # keeps (Route, Behaviour, Finding, ...) -- two workspaces both writing
+    # "specs/checkout.spec.ts" must never collide.
+    def put_spec(self, workspace_id: str, path: str, content: str) -> None:
+        self._store.put(
+            "specs", f"{workspace_id}:{path}",
+            {"workspace_id": workspace_id, "path": path, "content": content},
+        )
+
+    def spec(self, workspace_id: str, path: str) -> str | None:
+        row = self._store.get("specs", f"{workspace_id}:{path}")
+        return row["content"] if row else None
+
+    def specs_for_workspace(self, workspace_id: str) -> dict[str, str]:
+        rows = self._store.query("specs", "workspace_id", "==", workspace_id)
+        return {r["path"]: r["content"] for r in rows}
+
     # sessions ------------------------------------------------------------
     def put_session(self, s: Session) -> None:
         self._store.put("sessions", s.id, to_dict(s))
