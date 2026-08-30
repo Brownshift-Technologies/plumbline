@@ -175,12 +175,36 @@ _JWT = re.compile(r"\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}
 # github_pat_ (fine-grained PATs) -- the five single-letter classic prefixes
 # and the one long-form prefix GitHub itself documents.
 _GITHUB_TOKEN = re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,255}\b|\bgithub_pat_[A-Za-z0-9_]{20,255}\b")
-# Google API keys are always exactly "AIza" + 35 more characters.
-_GOOGLE_API_KEY = re.compile(r"\bAIza[0-9A-Za-z_\-]{35}\b")
+# Google API keys are canonically "AIza" + 35 more characters (39 total),
+# but this is deliberately an OPEN-ENDED range (`{20,}`), not the exact
+# `{35}` an earlier cut of this pattern used. That earlier version is what
+# a fix-round probe caught: `{35}` is a FIXED repeat, so a real-world key
+# even one character longer than 35 (this fixture, hyphenated, is 36) has
+# nowhere for the trailing `\b` to anchor -- Python's `re` does not
+# backtrack a fixed `{n}` count down to a shorter match, so the WHOLE
+# pattern silently failed to match at all, and the credential fell through
+# untouched to `_PHONE` a few lines below in `redact_pii`, which claimed
+# just the ten-digit run in the middle ("AIzaSyD-[PHONE]abcdefghijklmnopqr
+# stuv"): a dented, still-recognisable, still-live key, not a redacted
+# one. An open floor with no ceiling is what every other vendor pattern in
+# this section already uses (GOCSPX, Stripe, GitHub) for the same reason --
+# see `test_a_google_api_key_is_wholly_redacted` and `test_no_secret_
+# leaves_a_recognisable_fragment` in tests/test_core_guards.py, which now
+# assert nothing of the original key survives, not merely that the string
+# changed.
+_GOOGLE_API_KEY = re.compile(r"\bAIza[0-9A-Za-z_\-]{20,}\b")
 _GOOGLE_OAUTH_SECRET = re.compile(r"\bGOCSPX-[0-9A-Za-z_\-]{20,}\b")
+# Google OAuth access tokens ("ya29." + a long opaque string) -- these
+# appear in a checkout/OAuth HAR's Authorization headers and token-exchange
+# response bodies constantly, at least as often as a GOCSPX client secret.
+_GOOGLE_OAUTH_TOKEN = re.compile(r"\bya29\.[0-9A-Za-z_\-]{10,}\b")
 _STRIPE_KEY = re.compile(r"\b(?:sk_live|sk_test|rk_live)_[0-9A-Za-z]{10,}\b")
-# AWS access key ids are always exactly "AKIA" + 16 uppercase alphanumerics.
-_AWS_ACCESS_KEY = re.compile(r"\bAKIA[0-9A-Z]{16}\b")
+# AWS access key ids are canonically exactly "AKIA" + 16 uppercase
+# alphanumerics (20 total) -- widened to an open `{16,}` floor for the same
+# reason _GOOGLE_API_KEY was above: a fixed `{16}` fails outright, rather
+# than merely under-matching, the moment one more valid character follows
+# with no delimiter in between.
+_AWS_ACCESS_KEY = re.compile(r"\bAKIA[0-9A-Z]{16,}\b")
 # An AWS secret access key has no distinctive prefix of its own -- it is a
 # 40-character base64-ish string that would need a bare entropy heuristic to
 # catch in isolation, exactly what this module deliberately avoids (see the
@@ -284,6 +308,7 @@ def redact_pii(text: str) -> str:
     text = _GITHUB_TOKEN.sub("[GITHUB_TOKEN]", text)
     text = _GOOGLE_API_KEY.sub("[GOOGLE_API_KEY]", text)
     text = _GOOGLE_OAUTH_SECRET.sub("[GOOGLE_OAUTH_SECRET]", text)
+    text = _GOOGLE_OAUTH_TOKEN.sub("[GOOGLE_OAUTH_TOKEN]", text)
     text = _STRIPE_KEY.sub("[STRIPE_KEY]", text)
     text = _AWS_ACCESS_KEY.sub("[AWS_ACCESS_KEY]", text)
     text = _redact_aws_secret(text)

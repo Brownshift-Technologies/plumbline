@@ -378,8 +378,145 @@ def test_a_google_api_key_is_redacted():
     assert redact_pii(f"key={_GOOGLE_API_KEY_EXAMPLE}") == "key=[GOOGLE_API_KEY]"
 
 
+def test_a_google_api_key_is_wholly_redacted():
+    # Fix round 2: the ORIGINAL _GOOGLE_API_KEY pattern used a fixed {35}
+    # repeat, which is exactly correct for a canonical 39-character key but
+    # FAILS TO MATCH AT ALL -- not merely under-matches -- the moment a real
+    # key is one character longer (this one, hyphenated, is 36 chars after
+    # "AIza"). Python's `re` never backtracks a fixed {n} count down to a
+    # shorter match, so the whole pattern silently missed, and the key fell
+    # through to `_PHONE` a few patterns later, which claimed only the
+    # ten-digit run in the middle: "AIzaSyD-[PHONE]abcdefghijklmnopqrstuv" --
+    # a dented, still-recognisable, still-LIVE key, not a redacted one.
+    out = redact_pii("AIzaSyD-1234567890abcdefghijklmnopqrstuv")
+    assert "[GOOGLE_API_KEY]" in out
+    assert "AIza" not in out
+    assert "abcdefghijklmnopqrstuv" not in out
+    assert "[PHONE]" not in out
+
+
 def test_a_google_oauth_client_secret_is_redacted():
     assert redact_pii("GOCSPX-abcdefghijklmnopqrstuvwx") == "[GOOGLE_OAUTH_SECRET]"
+
+
+def test_a_google_oauth_access_token_is_redacted():
+    # ya29.<opaque> -- a Google OAuth access token, at least as common in a
+    # checkout/OAuth HAR's Authorization headers and token-exchange
+    # response bodies as a GOCSPX client secret.
+    out = redact_pii("ya29.a0AfH6SMBx1234567890abcdefghijklmnopqrstuvwxyzABCDEFG")
+    assert out == "[GOOGLE_OAUTH_TOKEN]"
+
+
+def test_an_aws_access_key_id_one_character_longer_than_the_canonical_length_is_still_wholly_redacted():
+    # The same class of bug as the Google API key above, pinned directly
+    # against the pattern that could have carried it too (_AWS_ACCESS_KEY
+    # was also a fixed {16} before this fix round): one extra glued
+    # character must not make the whole pattern miss.
+    out = redact_pii("AKIAIOSFODNN7EXAMPLEEXTRA")
+    assert out == "[AWS_ACCESS_KEY]"
+    assert "IOSFODNN7EXAMPLEEXTRA" not in out
+
+
+# --- fix round 2: nothing recognisable may survive, for every credential --
+#
+# The gap the Google API key bug exposed: a test asserting only
+# `redact_pii(x) != x`, or only that a marker is PRESENT, passes when a
+# credential is merely DENTED (a marker shows up somewhere, but so does most
+# of the original value) -- exactly what happened. Every case below instead
+# asserts that specific, sensitive fragments of the ORIGINAL credential are
+# ABSENT from the output -- the only assertion that would have caught the
+# bug this fix round closes, and the one now guarding every credential this
+# module claims to handle, not only the one that was probed.
+
+_SECRET_FRAGMENT_CASES = [
+    pytest.param(
+        f"Authorization: Bearer {_JWT_EXAMPLE}",
+        [_JWT_EXAMPLE, "eyJhbGciOiJIUzI1NiJ9", "dQw4w9WgXcQ"],
+        id="bearer",
+    ),
+    pytest.param(
+        "Authorization: Basic dXNlcjpwYXNz",
+        ["dXNlcjpwYXNz"],
+        id="basic_auth",
+    ),
+    pytest.param(
+        _JWT_EXAMPLE,
+        [_JWT_EXAMPLE, "eyJhbGciOiJIUzI1NiJ9", "dQw4w9WgXcQ"],
+        id="bare_jwt",
+    ),
+    pytest.param(
+        "ghp_1234567890abcdefghijklmnopqrstuvwx",
+        ["1234567890abcdefghijklmnopqrstuvwx"],
+        id="github_classic",
+    ),
+    pytest.param(
+        "github_pat_11ABCDEFG0123456789012_"
+        "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQ",
+        ["11ABCDEFG0123456789012", "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQ"],
+        id="github_fine_grained",
+    ),
+    pytest.param(
+        _GOOGLE_API_KEY_EXAMPLE,
+        [_GOOGLE_API_KEY_EXAMPLE[4:], "1234567890"],
+        id="google_api_key_canonical_length",
+    ),
+    pytest.param(
+        # The exact shape that broke: one character longer than 35, hyphenated.
+        "AIzaSyD-1234567890abcdefghijklmnopqrstuv",
+        ["1234567890", "abcdefghijklmnopqrstuv", "[PHONE]"],
+        id="google_api_key_one_char_over",
+    ),
+    pytest.param(
+        "GOCSPX-abcdefghijklmnopqrstuvwx",
+        ["abcdefghijklmnopqrstuvwx"],
+        id="google_oauth_secret",
+    ),
+    pytest.param(
+        "ya29.a0AfH6SMBx1234567890abcdefghijklmnopqrstuvwxyzABCDEFG",
+        ["1234567890", "abcdefghijklmnopqrstuvwxyzABCDEFG"],
+        id="google_oauth_token",
+    ),
+    pytest.param(
+        "sk_" + "live_51H8x2KJd9fooBarBaz1234567890",
+        ["51H8x2KJd9fooBarBaz1234567890", "1234567890"],
+        id="stripe_live",
+    ),
+    pytest.param(
+        "rk_" + "live_51H8x2KJd9fooBarBaz1234567890",
+        ["51H8x2KJd9fooBarBaz1234567890"],
+        id="stripe_restricted",
+    ),
+    pytest.param(
+        "AKIAIOSFODNN7EXAMPLE",
+        ["IOSFODNN7EXAMPLE"],
+        id="aws_access_key",
+    ),
+    pytest.param(
+        "aws_secret_access_key=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        ["wJalrXUtnFEMI", "bPxRfiCYEXAMPLEKEY"],
+        id="aws_secret",
+    ),
+    pytest.param(
+        "pk_live_abcdefghij1234567890",
+        ["abcdefghij1234567890"],
+        id="plumbline_key",
+    ),
+    pytest.param("password=hunter2", ["hunter2"], id="generic_password"),
+    pytest.param("?api_key=abc123def456&x=1", ["abc123def456"], id="generic_api_key"),
+]
+
+
+@pytest.mark.parametrize("raw, fragments", _SECRET_FRAGMENT_CASES)
+def test_no_secret_leaves_a_recognisable_fragment(raw, fragments):
+    """Every credential this module claims to redact must be WHOLLY
+    claimed by its marker -- never dented by a PII pattern (or anything
+    else) that happens to match a digit run or substring inside it. This
+    is the test that would have caught the Google API key bug; the
+    fixture list above deliberately includes the exact shape that broke,
+    plus every other credential kind this module handles."""
+    out = redact_pii(raw)
+    leaked = [f for f in fragments if f in out]
+    assert leaked == [], f"fragment(s) of the original credential survived: {leaked!r} in {out!r}"
 
 
 @pytest.mark.parametrize("prefix", ["sk_live_", "sk_test_", "rk_live_"])
