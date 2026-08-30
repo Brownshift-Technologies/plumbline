@@ -176,6 +176,61 @@ class Repo:
         rows = [Run(**r) for r in self._store.query("runs", "workspace_id", "==", wid)]
         return sorted(rows, key=lambda r: r.number, reverse=True)
 
+    def claim_run(self, run_id: str) -> Run | None:
+        """Atomically transitions a `"queued"` `Run` to `"running"` AND
+        increments its workspace's `runs_used`, in the SAME transaction --
+        Task 13's own carried ruling: `runs_used` increments exactly once
+        per execution, at the start, so a worker that crashes mid-run still
+        consumed a run, and it must never happen twice for one run.
+
+        Bundling both writes into one transaction is what makes "exactly
+        once" survive two workers racing on the same `run_id` (Cloud Run
+        Jobs retrying an execution, or any other double-dispatch): both
+        transactions read the same `state=="queued"` snapshot, both attempt
+        to commit, and Firestore's optimistic-concurrency check -- the exact
+        mechanism `claim_email`/`consume_totp_step` above already rely on --
+        aborts whichever commits second. Its retry re-reads the run, now
+        sees `state=="running"`, and this method returns `None` for it: the
+        workspace is billed once, not twice, and only one caller ever goes
+        on to build an `AgentContext` and run the fleet.
+
+        Returns the claimed `Run` (now `state=="running"`) on success, or
+        `None` if: the run does not exist; it is not `"queued"` (already
+        claimed, already finished, cancelled -- `job/orchestrator.py`'s
+        caller is expected to have already checked this cheaply before ever
+        reaching here, but this method re-checks inside the transaction
+        regardless, since that cheap check is not itself race-safe); or its
+        workspace no longer exists (deleted between the run being enqueued
+        and a worker picking it up -- `job/orchestrator.py` is the caller
+        that decides what a run with no workspace left to bill becomes).
+        """
+        from google.cloud import firestore
+
+        run_ref = self._store.doc("runs", run_id)
+
+        @firestore.transactional
+        def _claim(transaction) -> Run | None:
+            run_snapshot = run_ref.get(transaction=transaction)
+            if not run_snapshot.exists:
+                return None
+            run_data = run_snapshot.to_dict()
+            if run_data.get("state") != "queued":
+                return None
+
+            workspace_ref = self._store.doc("workspaces", run_data["workspace_id"])
+            workspace_snapshot = workspace_ref.get(transaction=transaction)
+            if not workspace_snapshot.exists:
+                return None
+            workspace_data = workspace_snapshot.to_dict()
+            workspace_data["runs_used"] = workspace_data.get("runs_used", 0) + 1
+            transaction.set(workspace_ref, workspace_data)
+
+            run_data["state"] = "running"
+            transaction.set(run_ref, run_data)
+            return Run(**run_data)
+
+        return _claim(self._store.transaction())
+
     def append_step(self, s: Step) -> None:
         self._store.put("steps", s.id, to_dict(s))
 

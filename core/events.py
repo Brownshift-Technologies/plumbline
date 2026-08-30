@@ -96,3 +96,50 @@ def enqueue_job(config: Config, job_name: str, args: dict, client=None) -> str:
     }
     lro = client.run_job(request=request)
     return lro.operation.name
+
+
+def publish_event(config: Config, event_type: str, payload: dict, client=None) -> str:
+    """Publish one Plumbline event to the single Pub/Sub topic
+    `core.web.create_app`'s `/events` receiver (`app/main.py`'s `_on_event`)
+    is subscribed to -- `run.requested`/`run.step`/`run.finished`, per that
+    module's own docstring, all ride this one topic rather than one topic
+    each, matched by `event_type` inside the payload rather than by which
+    topic delivered it. `job/worker.py` is this function's first real
+    caller, publishing `run.finished` once a run reaches a terminal state
+    (see that module's own docstring for why `run.step` is deliberately NOT
+    published here -- Task 14a's SSE stream reads Firestore directly, on a
+    poll, specifically so it does not depend on Pub/Sub fan-out landing on
+    the right instance; publishing `run.step` too is real, but out-of-scope,
+    work for a later task to pick up, not something this function's shape
+    forecloses).
+
+    `client=None` builds the real `google.cloud.pubsub_v1.PublisherClient`
+    lazily, deferred to first use for the exact reason `core.store.Store`'s
+    own `_client` property defers building a Firestore client (see that
+    property's docstring): constructing the real client resolves
+    Application Default Credentials immediately, and this module has to
+    stay importable -- and every test in this suite has to stay collectable
+    -- in an environment with none configured. Every caller in this
+    codebase's own tests passes a fake instead, the same discipline
+    `enqueue_job`'s own `client=` parameter above already established.
+
+    The topic name is derived from `config.project_id` alone, with no new
+    config field: `enqueue_job` above already builds its own resource path
+    the same way, and a single, fixed topic name
+    (`plumbline-events`, matching `app/main.py`'s comment about the topic
+    Task 14a+ wires up) needs nothing more than the project it lives in.
+
+    Returns the published message's id (Pub/Sub's own ack of "this was
+    received"), which no caller in this codebase currently inspects but
+    which is the honest, real return value `Publisher.publish(...).result()`
+    hands back -- swallowing it would throw away the one piece of evidence
+    "the publish actually happened" if a caller ever needs it.
+    """
+    if client is None:
+        from google.cloud import pubsub_v1
+
+        client = pubsub_v1.PublisherClient()
+    topic_path = f"projects/{config.project_id}/topics/plumbline-events"
+    body = json.dumps({"type": event_type, **payload}).encode("utf-8")
+    future = client.publish(topic_path, body)
+    return future.result()

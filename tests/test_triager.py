@@ -292,3 +292,33 @@ def test_reading_the_har_through_runner_written_artefacts_end_to_end():
 
     out = Triager(attempts=5).run(ctx)
     assert out.data["finding_id"] is not None
+
+
+# --- only_specs: Task 13's wiring for "Runner's actual failures, not the
+# whole workspace" --------------------------------------------------------
+
+
+def test_only_specs_narrows_triage_to_exactly_those_paths():
+    ctx = make_ctx(
+        spec_results={_SPEC_PATH: [dict(_ASSERTION_FAILURE) for _ in range(5)]},
+        model_responses=("A stale checkout total.",),
+    )
+    ctx.repo.put_spec("ws1", _SPEC_PATH, _SPEC_CONTENT)
+    # A second spec with NO seeded spec_results at all -- FakeBrowser fails
+    # this closed ("no result seeded"), which classifies as a candidate
+    # failure too if Triager ever scans it. only_specs must keep it out of
+    # the batch entirely, not just out of the final report.
+    ctx.repo.put_spec("ws1", "specs/other.spec.ts", _SPEC_CONTENT)
+
+    out = Triager(attempts=5, only_specs=[_SPEC_PATH]).run(ctx)
+
+    assert out.data["finding_id"] == f"fnd_ws1:{_SPEC_PATH}"
+    findings = ctx.repo.findings_for_workspace("ws1")
+    assert len(findings) == 1
+    assert findings[0].id == f"fnd_ws1:{_SPEC_PATH}"
+
+
+def test_only_specs_none_keeps_the_original_whole_workspace_behaviour(ctx):
+    # The default -- every caller before Task 13, and every OTHER test in
+    # this file -- must be unaffected by this parameter existing at all.
+    assert Triager(attempts=5, only_specs=None).run(ctx).data["finding_id"] == f"fnd_ws1:{_SPEC_PATH}"

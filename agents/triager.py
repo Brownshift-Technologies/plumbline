@@ -134,11 +134,32 @@ def _root_cause_prompt(candidate: dict, attempts: int) -> str:
 class Triager:
     name = "triager"
 
-    def __init__(self, attempts: int = DEFAULT_ATTEMPTS):
+    def __init__(self, attempts: int = DEFAULT_ATTEMPTS, only_specs: list[str] | None = None):
         self.attempts = max(1, attempts)
+        # Task 13's own carried ruling: the orchestrator hands Triager
+        # Runner's ACTUAL failure list rather than leaving this agent to
+        # re-run every spec in the workspace `attempts` times, which is
+        # both wasteful (a workspace with 40 passing specs and 1 failure
+        # cost 40 * attempts reproduction runs it had no reason to make)
+        # and slower than it needs to be by the same factor -- the fleet's
+        # existing scale problem this field exists to close. `None` (the
+        # default) preserves the original, pre-Task-13 behaviour byte for
+        # byte: every caller that built a `Triager` before this field
+        # existed -- every test in this file included -- gets exactly the
+        # same "every spec in the workspace" scan it always did. A caller
+        # that DOES pass `only_specs` gets the scan narrowed to exactly
+        # those paths; `run()` still applies every one of this agent's own
+        # rules (selector-kind failures skipped, a spec that now holds is
+        # dropped, flake-vs-deterministic classification) to whatever this
+        # narrower set turns out to be -- narrowing the INPUT list changes
+        # nothing about how each spec in it is judged.
+        self.only_specs = only_specs
 
     def run(self, ctx) -> AgentResult:
         specs = sorted(ctx.repo.specs_for_workspace(ctx.workspace_id).items())
+        if self.only_specs is not None:
+            only = set(self.only_specs)
+            specs = [(path, content) for path, content in specs if path in only]
 
         def reproduce():
             candidates = []

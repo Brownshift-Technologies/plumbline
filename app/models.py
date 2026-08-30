@@ -63,6 +63,24 @@ class Workspace:
     # way (falls back to DEFAULT_RULES) so a workspace can never end up
     # unconstrained just because nobody has set gate_rules yet.
     gate_rules: tuple[dict, ...] = ()
+    # Added for Task 13: the ordered list of live environment names this
+    # workspace has wired a browser up to (e.g. `("production", "staging")`)
+    # -- `job/orchestrator.py`'s whole basis for "does Oracle have a second
+    # environment to diff against". Oracle (agents/oracle.py) needs TWO
+    # named drivers on `ctx.browsers` to run at all (`ctx.browsers[baseline_
+    # env]`/`ctx.browsers[candidate_env]` -- a `KeyError` otherwise), so the
+    # orchestrator only ever builds those two browsers, and only ever
+    # instantiates Oracle, when this tuple holds at least two names; an
+    # empty or single-entry tuple (the default -- most workspaces, and every
+    # workspace before this task, have configured nothing here) means Oracle
+    # is skipped for that run rather than crashing it. `environments[0]`/
+    # `environments[1]` are read as baseline/candidate in that order -- a
+    # deliberately simple two-slot convention, not an open comparison matrix
+    # (see agents/oracle.py's own module docstring for why "more than two
+    # environments" is a real future need this shape does not foreclose:
+    # a workspace that wants a third comparison adds a third orchestrator
+    # step, not a new field here).
+    environments: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

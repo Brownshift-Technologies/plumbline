@@ -252,3 +252,75 @@ def test_two_real_concurrent_claims_for_the_same_email_only_one_wins():
     assert interleaved == [True], "the interleaving never happened"
     assert b_result == [True]  # B ran to completion first and won
     assert a_result is False  # A's retry saw B's claim and correctly lost
+
+
+# --- claim_run: Task 13's atomic "start running, bill once" guard --------
+
+
+def test_claim_run_transitions_to_running_and_bills_the_workspace_once():
+    r = _repo()
+    r.put_workspace(Workspace(id="ws1", name="Acme", repo="acme/site"))
+    r.put_run(Run(id="run1", workspace_id="ws1", number=1, trigger="manual"))
+
+    claimed = r.claim_run("run1")
+
+    assert claimed.state == "running"
+    assert r.run("run1").state == "running"
+    assert r.workspace("ws1").runs_used == 1
+
+
+def test_claim_run_refuses_a_run_that_is_not_queued():
+    r = _repo()
+    r.put_workspace(Workspace(id="ws1", name="Acme", repo="acme/site"))
+    r.put_run(Run(id="run1", workspace_id="ws1", number=1, trigger="manual", state="running"))
+
+    assert r.claim_run("run1") is None
+    assert r.workspace("ws1").runs_used == 0  # never billed twice
+
+
+def test_claim_run_returns_none_for_an_unknown_run():
+    r = _repo()
+    assert r.claim_run("does-not-exist") is None
+
+
+def test_claim_run_returns_none_when_the_workspace_no_longer_exists():
+    r = _repo()
+    r.put_run(Run(id="run1", workspace_id="ws_gone", number=1, trigger="manual"))
+    assert r.claim_run("run1") is None
+    assert r.run("run1").state == "queued"  # untouched -- never half-claimed
+
+
+def test_two_real_concurrent_claims_for_the_same_run_only_one_wins():
+    # Mirrors test_two_real_concurrent_claims_for_the_same_email_only_one_wins
+    # above: force a real interleaving so FakeTransaction's abort-and-retry
+    # path actually runs, rather than calling claim_run twice in sequence
+    # (which never proves the race is closed at all).
+    from core import fakes
+
+    fake = FakeFirestore()
+    r_a = Repo(_config(), client=fake)
+    r_b = Repo(_config(), client=fake)
+    r_a.put_workspace(Workspace(id="ws1", name="Acme", repo="acme/site"))
+    r_a.put_run(Run(id="run1", workspace_id="ws1", number=1, trigger="manual"))
+
+    original_get = fakes.FakeDoc.get
+    interleaved = []
+    b_result = []
+
+    def get_then_let_the_other_worker_in(self, transaction=None):
+        snapshot = original_get(self, transaction=transaction)
+        if self._path == "plumbline_runs/run1" and not interleaved:
+            interleaved.append(True)
+            b_result.append(r_b.claim_run("run1"))
+        return snapshot
+
+    fakes.FakeDoc.get = get_then_let_the_other_worker_in
+    try:
+        a_result = r_a.claim_run("run1")
+    finally:
+        fakes.FakeDoc.get = original_get
+
+    assert interleaved == [True], "the interleaving never happened"
+    assert b_result[0] is not None and b_result[0].state == "running"  # B won
+    assert a_result is None  # A's retry saw B's claim and correctly lost
+    assert r_a.workspace("ws1").runs_used == 1  # billed exactly once, not twice
