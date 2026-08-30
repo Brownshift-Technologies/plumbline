@@ -1,5 +1,9 @@
+import datetime
+import logging
 import re
 from dataclasses import dataclass
+
+_log = logging.getLogger(__name__)
 
 # Both repeats around the "@" are bounded, and that is load-bearing rather than
 # cosmetic: with `+` on either side this pattern is quadratic in the length of
@@ -161,3 +165,181 @@ def check_input(text: str) -> GuardResult:
         if pattern.search(text):
             return GuardResult(allowed=False, reason="instruction_override", text=redact_pii(text))
     return GuardResult(allowed=True, reason=None, text=redact_pii(text))
+
+
+# --- redact_deep: PII redaction across a whole structure, not one string --
+#
+# Promoted here from core.store's private `_redact` (fix round 1 on the
+# Gateway task): the Gateway needs to redact a `.read` tool's result before
+# handing it back, and that result is not always a bare string -- a HAR
+# capture, a trace object, a findings list are all naturally shaped as
+# nested dicts/lists/tuples. redact_pii's contract is str-only by design
+# (see its own docstring), so something has to walk the structure down to
+# its string leaves and reassemble the same shape around the redacted
+# values. core.store already had exactly that walker, privately, doing
+# double duty for every audit write; keeping a second, independent
+# implementation of "walk a nested structure looking for strings" in
+# gateway.py (or anywhere else that needed it next) is how the two
+# quietly drift apart from each other over time. This is the one
+# implementation now -- core.store._redact is a thin alias for it (see
+# core/store.py), not a parallel copy.
+#
+# Behaviour, unchanged from the promoted original:
+#   - str                       -> redact_pii(value)
+#   - something with a Firestore-style `_document_path` (duck-typed via
+#     getattr, so this needs no google.cloud import) -> its path,
+#     redacted. Firestore document IDs allow "@", so the PII is usually in
+#     the ID segment; returned as a plain string, not a rebuilt reference,
+#     because a reference built around a redacted path would be a live,
+#     writable address for a document that cannot exist.
+#   - dict                      -> every key AND value redacted (a dict
+#     can be keyed by an email address or a case number just as easily as
+#     it can hold one as a value); two keys colliding after redaction are
+#     both kept, suffixed ("#2", "#3", ...) rather than one silently
+#     overwriting the other.
+#   - list / tuple              -> same container type, every item redacted.
+#   - set / frozenset           -> a list of every member redacted. Not a
+#     set: redaction can map two distinct members onto the same string,
+#     which a set would silently deduplicate away, dropping a member the
+#     caller wrote.
+#   - bytes                     -> UTF-8 decoded and redacted when that
+#     succeeds; a "[BINARY:NB]" length marker when it doesn't (a regex
+#     cannot scan a binary blob for the PII inside it, and passing
+#     unscanned bytes through would put data past this barrier entirely).
+#   - None / int / float / datetime.datetime -> passed through unchanged
+#     (bool is an int subclass and already covered). These are scalars
+#     with no string inside for redact_pii to scan; an int CAN still carry
+#     PII (a phone number persists as an integer), but redact_pii is
+#     str-only by signature, and warning on every timestamp and count in
+#     an ordinary structure would bury the one warning that matters.
+#   - anything else              -> passed through unchanged, and logged --
+#     an unrecognised type reaching storage or a caller unscanned has
+#     leaked before (a set, then a Firestore reference type), always found
+#     by a reviewer rather than by anything the code said. This still does
+#     not raise: a leak is bad, a call that dies because of a redaction
+#     helper is worse.
+#
+# New behaviour, added when this was promoted: cycle safety. The original
+# `_redact` had none -- audit-entry dicts are built fresh from JSON-shaped
+# data, which cannot cycle back on itself, so it was never exercised. A
+# `.read` tool's result is not guaranteed to have come from JSON first (a
+# HAR-derived object graph can carry a parent/back-reference), and walking
+# a cycle with no guard would not "hang" so much as blow the recursion
+# stack -- Python raises RecursionError, which is exactly the kind of
+# crash-instead-of-degrade this function's "never raise" contract exists
+# to avoid. `_seen` tracks the ids of every container currently being
+# descended into (not every container ever seen -- two unconnected
+# branches that happen to alias the same list are not a cycle, and must
+# not be flagged as one); re-entering one still on that stack returns the
+# literal string "[CIRCULAR]" in its place -- visible in the output, the
+# same way "[BINARY:9B]" already marks a value this function could not
+# faithfully redact-and-preserve, rather than the branch just vanishing.
+_CIRCULAR = "[CIRCULAR]"
+
+
+def redact_deep(value, _seen: frozenset | None = None):
+    if isinstance(value, str):
+        return redact_pii(value)
+    document_path = _document_path_of(value)
+    if isinstance(document_path, str):
+        return redact_pii(document_path)
+    if isinstance(value, dict):
+        return _redact_mapping(value, _seen)
+    if isinstance(value, (list, tuple)):
+        return _redact_sequence(value, type(value), _seen)
+    if isinstance(value, (set, frozenset)):
+        # Returned as a list -- see the module-level note above.
+        return _redact_sequence(value, list, _seen)
+    if isinstance(value, bytes):
+        try:
+            text = value.decode("utf-8")
+        except UnicodeDecodeError:
+            return f"[BINARY:{len(value)}B]"
+        return redact_pii(text).encode("utf-8")
+    if isinstance(value, (type(None), int, float, datetime.datetime)):
+        return value
+    _warn_unhandled(value)
+    return value
+
+
+def _enter(container, seen) -> frozenset | None:
+    """The `_seen` set to descend into `container` with, or None if
+    `container` is already on the current recursion stack (a cycle)."""
+    ids = frozenset() if seen is None else seen
+    if id(container) in ids:
+        return None
+    return ids | {id(container)}
+
+
+def _redact_sequence(items, ctor, seen):
+    next_seen = _enter(items, seen)
+    if next_seen is None:
+        return _CIRCULAR
+    return ctor(redact_deep(item, next_seen) for item in items)
+
+
+def _redact_mapping(mapping: dict, seen) -> dict:
+    next_seen = _enter(mapping, seen)
+    if next_seen is None:
+        return _CIRCULAR
+    redacted: dict = {}
+    for key, value in mapping.items():
+        if isinstance(key, bytes):
+            # protobuf accepts a bytes key where a MapValue wants a string
+            # field name, so a bytes key really does persist -- and it
+            # persists as a string. (int and tuple keys raise TypeError
+            # there, so those cannot reach storage at all.) Redact it
+            # through the same bytes path as values, then carry it as the
+            # string it will be stored as, so the collision suffixing
+            # below applies to it too.
+            key = redact_deep(key, next_seen)
+            if isinstance(key, bytes):
+                key = key.decode("utf-8")
+        new_key = redact_pii(key) if isinstance(key, str) else key
+        # Two different keys can redact to the same string ("[EMAIL]"),
+        # which would silently drop one of the values. Suffix instead:
+        # this is about stopping silent loss, not trading one kind for
+        # another.
+        if isinstance(new_key, str) and new_key in redacted:
+            suffix = 2
+            while f"{new_key}#{suffix}" in redacted:
+                suffix += 1
+            new_key = f"{new_key}#{suffix}"
+        redacted[new_key] = redact_deep(value, next_seen)
+    return redacted
+
+
+def _document_path_of(value):
+    """The value's Firestore document path, or None if it has none.
+
+    ``_document_path`` is a property that raises ValueError when the
+    reference was built without a client, and getattr's default does not
+    swallow that. Declining to redact such a reference costs nothing:
+    Firestore's own encoder reads the same property and raises the same
+    ValueError, so it was never going to reach storage. Catching it only
+    keeps this function from being what raises.
+    """
+    try:
+        return getattr(value, "_document_path", None)
+    except ValueError:
+        return None
+
+
+def _warn_unhandled(value) -> None:
+    """Leave a trace when a type reaches storage or a caller unscanned.
+
+    Firestore encodes more types than this function recognises (GeoPoint,
+    Vector, and whatever a future client version adds), and every one of
+    those persists without ever being looked at for PII. The types
+    Firestore *cannot* encode raise TypeError before anything is written,
+    so they are not exposures -- but they land here too, and a warning
+    naming them is cheaper than a branch guessing which is which.
+    """
+    cls = type(value)
+    _log.warning(
+        "redact_deep passed through an unhandled type: %s.%s -- if it can be "
+        "stored or returned as-is, it was persisted/returned without being "
+        "scanned for PII",
+        cls.__module__,
+        cls.__qualname__,
+    )

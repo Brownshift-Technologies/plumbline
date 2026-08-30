@@ -22,11 +22,16 @@ calling out directly. That gives one place to enforce, in order:
    where `rules` comes from -- says whether the call is allowed outright,
    allowed only with a human in the loop, or denied.
 4. **Execution.** Only once 1-3 have all cleared does `fn()` actually run.
-5. **Redaction on the way out.** A string result from a `*.read` tool is
-   passed through `redact_pii` before it reaches the caller -- the Gateway
-   is what makes "every artefact a `.read` tool hands back has had PII
-   scrubbed" a promise the platform keeps automatically, not something each
-   of the seven agents has to remember to do itself.
+5. **Redaction on the way out.** Any result from a `*.read` tool -- a bare
+   string or a nested dict/list/tuple (a HAR capture, a trace object) -- is
+   walked by `core.guards.redact_deep` before it reaches the caller. The
+   Gateway is what makes "every artefact a `.read` tool hands back has had
+   PII scrubbed" a promise the platform keeps automatically, not something
+   each of the seven agents has to remember to do itself, and not a promise
+   that quietly only held for the tools that happened to return a plain
+   string (fix round 1: an earlier version of this method redacted only
+   `isinstance(result, str)`, which meant a `.read` tool returning
+   structured data slipped past redaction entirely).
 
 Every one of those outcomes -- allowed, blocked, human-gated, or an error
 raised out of `fn()` -- is written to the workspace's ledger before `call`
@@ -61,7 +66,7 @@ not have. See `_rules_for`.
 """
 
 from app.models import Workspace
-from core.guards import check_input, redact_pii
+from core.guards import check_input, redact_deep
 from core.telemetry import log_event, span
 from gateway.policy import decide
 
@@ -72,6 +77,20 @@ from gateway.policy import decide
 # in SCOPES: a scope-only tool like `browser.read` has no gate concept at
 # all, and forcing a target on it would just break ordinary read calls that
 # never had one.
+#
+# Hand-maintained, and that is a real coupling to keep an eye on: a
+# workspace's own `gate_rules` (see `_rules_for`) are entirely data-driven
+# and can name any tool at all -- policy.py's layer of defence does not
+# need this set updated to gate a new tool. This set is the Gateway's OWN,
+# independent layer of defence-in-depth on top of that (see point 2 above),
+# and it only covers what it is told to: a future tool added to SCOPES with
+# its own gate pattern in some workspace's rules, but never added here,
+# silently loses this half of the protection -- policy.py would still
+# gate/deny it correctly, but the Gateway's missing-target check would not
+# fire for it. There is no mechanical way to derive this set from rules
+# data (rules are per-workspace and loaded per-call, not known up front),
+# so keeping it in sync with what gate_rules actually gate is a manual,
+# ongoing responsibility, not a one-time list.
 _GATED_TOOLS = frozenset({"pr.merge", "pr.open", "repo.write:src", "env.write"})
 
 
@@ -109,11 +128,6 @@ class Gateway:
         with span("gateway.call", agent=str(agent), tool=str(tool), target=str(target)):
             rules, policy_version = self._rules_for(workspace_id)
 
-            if tool in _GATED_TOOLS and not (target or "").strip():
-                reason = f"missing target for gated tool {tool!r}"
-                self._record(workspace_id, agent, tool, target, "blocked", reason, policy_version)
-                raise GatewayError(reason)
-
             if payload:
                 text = " ".join(str(v) for v in payload.values())
                 guard = check_input(text)
@@ -121,6 +135,11 @@ class Gateway:
                     reason = f"input rejected: {guard.reason}"
                     self._record(workspace_id, agent, tool, target, "blocked", reason, policy_version)
                     raise GatewayError(reason)
+
+            if tool in _GATED_TOOLS and not (target or "").strip():
+                reason = f"missing target for gated tool {tool!r}"
+                self._record(workspace_id, agent, tool, target, "blocked", reason, policy_version)
+                raise GatewayError(reason)
 
             decision = decide(agent, tool, target, rules=rules)
             if not decision.allowed:
@@ -141,15 +160,20 @@ class Gateway:
                 self._record(workspace_id, agent, tool, target, "errored", str(exc), policy_version)
                 raise
 
-            # redact_pii is a str-only contract (see core/store.py's own
-            # note on the same limit): a `.read` tool that hands back
-            # something structured -- a dict, a list -- passes through
-            # unredacted rather than being coerced through str() and back,
-            # which would silently turn a caller's structured result into a
-            # redacted string. This is a known scope limit, not an
-            # oversight -- see tests/test_gateway.py and the task report.
-            if tool.endswith(".read") and isinstance(result, str):
-                result = redact_pii(result)
+            # redact_deep walks a dict/list/tuple result down to its string
+            # leaves and reassembles the same shape around the redacted
+            # values -- a redacted dict stays a dict, a redacted list of
+            # findings stays a list of findings. A bare string result is
+            # just the depth-zero case of the same walk. Fix round 1: an
+            # earlier version only redacted `isinstance(result, str)`, so a
+            # `.read` tool returning structured data (a HAR-shaped dict, a
+            # trace object) slipped past redaction entirely -- see
+            # core.guards.redact_deep for the full contract, including how
+            # it handles a type it does not recognise (passes it through,
+            # never raises) and a cyclic structure (marks the re-entered
+            # container "[CIRCULAR]" rather than hanging).
+            if tool.endswith(".read"):
+                result = redact_deep(result)
 
             self._record(workspace_id, agent, tool, target, "allowed", decision.reason, policy_version)
             return result

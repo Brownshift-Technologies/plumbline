@@ -238,14 +238,73 @@ def test_a_raising_fn_propagates_and_still_leaves_one_ledger_entry(gw, ledger):
     assert "kaboom" in entries[0]["detail"]["reason"]
 
 
-def test_a_non_string_read_result_passes_through_unredacted(gw):
-    # redact_pii is a str-only contract. A .read tool that hands back a
-    # structured result (a dict, here) is a known gap this pins rather than
-    # hides: the Gateway does not coerce it through str() and back, which
-    # would silently replace a caller's structured result with a redacted
-    # string instead of the structure it asked for.
-    out = gw.call("ws1", "triager", "trace.read", fn=lambda: {"card": "4242 4242 4242 4242"})
-    assert out == {"card": "4242 4242 4242 4242"}
+# --- fix round 1, Important 1: redaction covers structured .read results ---
+#
+# The redaction hole flagged in review: an earlier version of Gateway.call
+# only redacted `isinstance(result, str)`, so a `.read` tool returning
+# anything structured -- exactly the shape a real trace/HAR read hands
+# back -- slipped past redaction entirely. Fixed by applying
+# core.guards.redact_deep to any .read result, not just a string one.
+
+
+def test_a_dict_read_result_is_redacted_and_stays_a_dict(gw):
+    out = gw.call(
+        "ws1", "triager", "trace.read",
+        fn=lambda: {"email": "sam@example.com", "status": "ok"},
+    )
+    assert out == {"email": "[EMAIL]", "status": "ok"}
+    assert isinstance(out, dict)
+
+
+def test_a_nested_list_of_dicts_is_redacted_throughout(gw):
+    out = gw.call(
+        "ws1", "triager", "trace.read",
+        fn=lambda: [{"contacts": [{"value": "reach sam@example.com"}]}],
+    )
+    assert out == [{"contacts": [{"value": "reach [EMAIL]"}]}]
+
+
+def test_a_card_number_inside_a_har_shaped_dict_does_not_survive(gw):
+    har = {
+        "log": {
+            "entries": [
+                {"request": {"postData": {"text": "card=4242 4242 4242 4242"}}},
+            ]
+        }
+    }
+    out = gw.call("ws1", "triager", "trace.read", fn=lambda: har)
+    text = out["log"]["entries"][0]["request"]["postData"]["text"]
+    assert "4242 4242 4242 4242" not in text
+    assert "[CARD]" in text
+
+
+def test_a_non_string_scalar_passes_through_untouched(gw):
+    out = gw.call(
+        "ws1", "triager", "trace.read",
+        fn=lambda: {"count": 3, "ok": True, "note": None},
+    )
+    assert out == {"count": 3, "ok": True, "note": None}
+
+
+def test_redact_deep_does_not_raise_on_an_unrecognised_type(gw):
+    class Weird:
+        pass
+
+    weird = Weird()
+    out = gw.call("ws1", "triager", "trace.read", fn=lambda: {"thing": weird})
+    assert out == {"thing": weird}
+
+
+def test_a_cyclic_structure_does_not_hang_redact_deep(gw):
+    # A HAR-derived object graph can carry a parent/back-reference. Decision:
+    # a cycle is marked "[CIRCULAR]" where re-entered, visibly, rather than
+    # the Gateway hanging or blowing the recursion stack redacting a .read
+    # result that happens to refer back to itself.
+    cyclic: dict = {"email": "sam@example.com"}
+    cyclic["parent"] = cyclic
+    out = gw.call("ws1", "triager", "trace.read", fn=lambda: cyclic)
+    assert out["email"] == "[EMAIL]"
+    assert out["parent"] == "[CIRCULAR]"
 
 
 def test_a_reentrant_call_from_within_fn_is_independently_authorised_and_recorded(gw, ledger):

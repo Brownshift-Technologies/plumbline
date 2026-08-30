@@ -1,6 +1,6 @@
 import pytest
 
-from core.guards import GuardResult, check_input, redact_pii
+from core.guards import GuardResult, check_input, redact_deep, redact_pii
 
 
 def test_redacts_email():
@@ -254,3 +254,63 @@ def test_a_card_is_claimed_before_the_ssn_pattern_can_carve_it_up():
 
 def test_an_ssn_still_redacts_on_its_own():
     assert "[SSN]" in redact_pii("ssn 123-45-6789")
+
+
+# --- redact_deep: shape-preserving redaction across nested structures ----
+# Fix round 1: promoted from core.store's formerly-private _redact, which
+# already solved this for audit writes. See core/guards.py's own comment
+# on redact_deep for the full behaviour contract.
+
+
+def test_redact_deep_redacts_a_flat_dicts_string_values():
+    out = redact_deep({"email": "sam@example.com", "note": "ok"})
+    assert out == {"email": "[EMAIL]", "note": "ok"}
+
+
+def test_redact_deep_redacts_a_nested_list_of_dicts_throughout():
+    out = redact_deep(
+        {"results": [{"contacts": [{"value": "reach sam@example.com"}]}]}
+    )
+    assert out == {"results": [{"contacts": [{"value": "reach [EMAIL]"}]}]}
+
+
+def test_redact_deep_preserves_tuple_shape():
+    out = redact_deep(("call 415-555-0132", 42))
+    assert out == ("call [PHONE]", 42)
+    assert isinstance(out, tuple)
+
+
+def test_redact_deep_passes_non_string_scalars_through_untouched():
+    out = redact_deep({"n": 1, "ok": True, "score": 0.5, "none": None})
+    assert out == {"n": 1, "ok": True, "score": 0.5, "none": None}
+
+
+def test_redact_deep_does_not_raise_on_an_unrecognised_type(caplog):
+    class Weird:
+        pass
+
+    weird = Weird()
+    with caplog.at_level("WARNING"):
+        out = redact_deep({"thing": weird})
+    assert out == {"thing": weird}
+
+
+def test_redact_deep_does_not_hang_on_a_cyclic_structure():
+    # A HAR-derived object graph can carry a parent/back-reference. A cycle
+    # is not something redact_deep should hang or blow the recursion stack
+    # on -- it marks the re-entered container "[CIRCULAR]" and moves on,
+    # visibly rather than silently dropping the branch.
+    cyclic: dict = {"email": "sam@example.com"}
+    cyclic["self"] = cyclic
+    out = redact_deep(cyclic)
+    assert out["email"] == "[EMAIL]"
+    assert out["self"] == "[CIRCULAR]"
+
+
+def test_redact_deep_a_shared_but_non_cyclic_reference_is_not_flagged_circular():
+    # Two unconnected branches that happen to alias the same list are not a
+    # cycle -- _seen tracks only what is currently on the recursion stack,
+    # not every container ever visited.
+    shared = ["sam@example.com"]
+    out = redact_deep({"a": shared, "b": shared})
+    assert out == {"a": ["[EMAIL]"], "b": ["[EMAIL]"]}
