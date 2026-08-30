@@ -98,10 +98,11 @@ class Repo:
 
         A legitimate user never needs to redeem an older or equal step than
         one already used -- time only moves forward -- so this closes the
-        replay window completely, not just "for however long this process's
-        memory happens to remember it" the way `app.security.verify_totp`'s
-        in-process dict does. It has to be transactional, not a plain
-        read-then-write, for the same reason `claim_email` above and
+        replay window completely, not just "for however long some
+        process's memory happens to remember it" the way Task 6/7's
+        original in-process dict did (removed in fix round 1 -- see
+        `app/security.py`'s module docstring). It has to be transactional,
+        not a plain read-then-write, for the same reason `claim_email` above and
         `gateway/ledger.py`'s `append` are: two concurrent requests
         presenting the same captured code would both read the old step
         before either writes the new one, and both would be accepted. The

@@ -102,6 +102,65 @@ def test_verify_with_no_pending_enrolment_is_rejected(client_owner_no_totp):
     assert r.status_code == 400
 
 
+# --- migrated from tests/test_security.py (fix round 1): same guarantees,
+# now tested against the mechanism that actually enforces them. Task 6/7
+# built these against `verify_totp`'s in-process replay dict; that
+# mechanism was removed, not renamed -- see app/security.py's module
+# docstring. `Repo.consume_totp_step` is what closes the replay window
+# now, exercised here via `totp_step_for`'s code-to-step lookup, using the
+# `repo`/`_seeded_user` this file's other RFC 6238 tests already use.
+
+
+def test_a_totp_code_does_not_verify_twice(repo):
+    # Replay: a code captured once (over a shoulder, in a log, on a
+    # compromised link) must not be usable a second time inside its
+    # validity window -- the standard TOTP replay attack.
+    secret = new_totp_secret()
+    user = _seeded_user(repo, secret)
+    code = pyotp.TOTP(secret).now()
+
+    step = totp_step_for(secret, code)
+    assert repo.consume_totp_step(user.id, step) is True
+    assert repo.consume_totp_step(user.id, step) is False
+
+
+def test_a_totp_replay_is_rejected_even_from_the_adjacent_window(repo):
+    # The same captured code must not become valid again just because time
+    # moved into the following window and the code is still inside the
+    # +/-1 step tolerance -- it was already consumed.
+    secret = new_totp_secret()
+    user = _seeded_user(repo, secret)
+    code = pyotp.TOTP(secret).now()
+
+    step = totp_step_for(secret, code)
+    assert repo.consume_totp_step(user.id, step) is True
+    # Still within the +/-1 step tolerance (totp_step_for resolves the same
+    # step again), but the counter is already spent -> rejected.
+    assert totp_step_for(secret, code) == step
+    assert repo.consume_totp_step(user.id, step) is False
+
+
+def test_totp_replay_tracking_is_per_secret(repo):
+    # Consuming a code for one user's secret must not affect another
+    # user's independently-generated code, even if by coincidence they
+    # collide -- Repo.consume_totp_step is keyed by user_id, not shared
+    # global state.
+    s1, s2 = new_totp_secret(), new_totp_secret()
+    u1 = User(id="u_totp_1", email="one@acme.com", password_hash="x", name="One", totp_secret=s1)
+    u2 = User(id="u_totp_2", email="two@acme.com", password_hash="x", name="Two", totp_secret=s2)
+    repo.put_user(u1)
+    repo.put_user(u2)
+
+    code1 = pyotp.TOTP(s1).now()
+    step1 = totp_step_for(s1, code1)
+    assert repo.consume_totp_step(u1.id, step1) is True
+    assert repo.consume_totp_step(u1.id, step1) is False
+
+    code2 = pyotp.TOTP(s2).now()
+    step2 = totp_step_for(s2, code2)
+    assert repo.consume_totp_step(u2.id, step2) is True
+
+
 # --- RFC 6238 replay, straight from the brief --------------------------------
 
 

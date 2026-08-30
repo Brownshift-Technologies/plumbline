@@ -1,5 +1,7 @@
 """app/main.py: build_app assembly, /_health, and the inherited /healthz."""
 
+import pytest
+
 # --- from the brief ---------------------------------------------------------
 
 
@@ -94,3 +96,64 @@ def test_seed_demo_if_missing_is_a_noop_when_seed_module_is_absent(client):
     # a clear TODO in that case, not a crash waiting to happen the moment
     # POST /api/auth/demo is hit.
     client.app.state.seed_demo_if_missing()  # must not raise
+
+
+# --- fix round 1: OAUTH_STATE_SECRET must be enforced, not merely documented -
+
+
+def test_build_app_raises_when_the_oauth_secret_is_unset_in_production(monkeypatch):
+    # The real-world path: no config override, no OAUTH_STATE_SECRET, and a
+    # deploy tier that is not explicitly dev/test -- exactly what an
+    # under-configured Cloud Run service looks like. `build_app()` must
+    # refuse to start rather than silently sign CSRF state with a fixed,
+    # source-visible string.
+    monkeypatch.setenv("PLUMBLINE_ENV", "production")
+    monkeypatch.delenv("OAUTH_STATE_SECRET", raising=False)
+    from app.main import build_app
+
+    with pytest.raises(RuntimeError, match="OAUTH_STATE_SECRET"):
+        build_app()
+
+
+def test_build_app_starts_in_test_mode_without_the_secret(config, repo):
+    # No monkeypatch here on purpose: this proves the AMBIENT pytest
+    # environment (PLUMBLINE_ENV=test, set once in tests/conftest.py) is
+    # already sufficient -- no individual test, this one included, has to
+    # set anything for the suite to keep working.
+    assert not config.oauth_state_secret
+    from app.main import build_app
+
+    app = build_app(config=config, repo=repo)
+    assert app.state.oauth_state_secret  # falls back, but starts
+
+
+def test_the_insecure_fallback_is_never_used_outside_dev_or_test(monkeypatch):
+    from app.main import _INSECURE_DEV_OAUTH_SECRET, build_app
+
+    # A real, configured secret always wins over the fallback, regardless
+    # of deploy tier -- production with a real secret must not raise.
+    monkeypatch.setenv("PLUMBLINE_ENV", "production")
+    monkeypatch.setenv("OAUTH_STATE_SECRET", "a-real-secret-from-secret-manager")
+    app = build_app()
+    assert app.state.oauth_state_secret == "a-real-secret-from-secret-manager"
+    assert app.state.oauth_state_secret != _INSECURE_DEV_OAUTH_SECRET
+
+    # Any deploy tier other than the two explicitly allow-listed ones (not
+    # just the literal string "production") is refused when the secret is
+    # unset -- the guard is an allow-list, not a "production"-string check.
+    monkeypatch.setenv("PLUMBLINE_ENV", "staging")
+    monkeypatch.delenv("OAUTH_STATE_SECRET", raising=False)
+    with pytest.raises(RuntimeError):
+        build_app()
+
+
+def test_dev_mode_also_accepts_the_fallback(monkeypatch):
+    # "test" is not the only allow-listed tier -- a real dev box running
+    # `PLUMBLINE_ENV=dev uvicorn app.main:app` with no secret configured
+    # yet must still be able to boot.
+    monkeypatch.setenv("PLUMBLINE_ENV", "dev")
+    monkeypatch.delenv("OAUTH_STATE_SECRET", raising=False)
+    from app.main import build_app
+
+    app = build_app()
+    assert app.state.oauth_state_secret

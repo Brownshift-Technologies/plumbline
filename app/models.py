@@ -36,10 +36,11 @@ class User:
     # ever successfully redeemed for this user, checked transactionally by
     # `Repo.consume_totp_step` before a code is accepted anywhere (sign-in
     # gate checks, `totp/verify`, `DELETE /api/auth/totp`). A per-process
-    # dict (as `app/security.py`'s `verify_totp` still is, deliberately, for
-    # Task 6/7's own tests) is invisible to a sibling Cloud Run instance; a
-    # field on the document already read/written for that user is not --
-    # see `Repo.consume_totp_step`'s docstring for the transactional detail.
+    # dict (Task 6/7's original approach, removed in fix round 1 -- see
+    # `app/security.py`'s module docstring) is invisible to a sibling Cloud
+    # Run instance; a field on the document already read/written for that
+    # user is not -- see `Repo.consume_totp_step`'s docstring for the
+    # transactional detail.
     last_used_totp_step: int = 0
     created_at: float = field(default_factory=time.time)
 

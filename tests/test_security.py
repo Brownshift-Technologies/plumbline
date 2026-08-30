@@ -7,8 +7,8 @@ from app.security import (
     hash_password,
     new_token,
     new_totp_secret,
+    totp_step_for,
     verify_password,
-    verify_totp,
 )
 
 # --- from the brief ---------------------------------------------------------
@@ -31,12 +31,17 @@ def test_two_hashes_of_one_password_differ():
 
 
 def test_a_current_totp_code_verifies():
+    # Fix round 1: verify_totp (which owned both code-matching and replay
+    # tracking) was removed -- see app/security.py's module docstring. The
+    # match-only half of its old contract is totp_step_for; the replay
+    # half now lives, correctly, in Repo.consume_totp_step
+    # (tests/test_totp.py).
     s = new_totp_secret()
-    assert verify_totp(s, pyotp.TOTP(s).now())
+    assert totp_step_for(s, pyotp.TOTP(s).now()) is not None
 
 
 def test_a_wrong_totp_code_does_not():
-    assert not verify_totp(new_totp_secret(), "000000")
+    assert totp_step_for(new_totp_secret(), "000000") is None
 
 
 def test_tokens_are_unique_and_long():
@@ -113,26 +118,14 @@ def test_verify_password_fails_closed_on_a_non_string_hash():
         assert verify_password("anything", garbage) is False
 
 
-def test_a_totp_code_does_not_verify_twice():
-    # Replay: a code captured once (over a shoulder, in a log, on a
-    # compromised link) must not be usable a second time inside its
-    # validity window -- this is the standard TOTP replay attack.
-    s = new_totp_secret()
-    code = pyotp.TOTP(s).now()
-    assert verify_totp(s, code) is True
-    assert verify_totp(s, code) is False
-
-
-def test_a_totp_replay_is_rejected_even_from_the_adjacent_window():
-    # The same captured code must not become valid again just because time
-    # moved into the following window and the code is still inside
-    # valid_window's tolerance -- it was already consumed.
-    s = new_totp_secret()
-    totp = pyotp.TOTP(s)
-    code = totp.now()
-    assert verify_totp(s, code) is True
-    # Still within the +/-1 step tolerance, but the same counter -> reused.
-    assert verify_totp(s, code) is False
+# The three replay tests that used to live here (a code does not verify
+# twice, a replay is rejected even from the adjacent window, replay
+# tracking is per-secret) moved to tests/test_totp.py, against
+# Repo.consume_totp_step -- see app/security.py's module docstring for
+# why the mechanism they exercised moved, and this codebase's fix-round
+# report for the "same guarantee, correct mechanism" framing: those
+# guarantees still hold and are still tested, just against the thing that
+# is now actually responsible for them.
 
 
 def test_totp_accepts_the_adjacent_window_for_clock_skew():
@@ -140,12 +133,12 @@ def test_totp_accepts_the_adjacent_window_for_clock_skew():
     totp = pyotp.TOTP(s)
     now = int(time.time())
     previous_step_code = totp.at(now - totp.interval)
-    assert verify_totp(s, previous_step_code) is True
+    assert totp_step_for(s, previous_step_code) is not None
 
 
 def test_totp_rejects_a_code_two_windows_away():
     # Window is +/-1 step (30s); a code from two steps away (60s) is outside
-    # that tolerance and must not verify -- otherwise the window is wider
+    # that tolerance and must not match -- otherwise the window is wider
     # than the clock-skew justification for it.
     s = new_totp_secret()
     totp = pyotp.TOTP(s)
@@ -155,18 +148,7 @@ def test_totp_rejects_a_code_two_windows_away():
     # same 6 digits as something inside the accepted window.
     if far_code in (totp.at(now), totp.at(now - totp.interval), totp.at(now + totp.interval)):
         return
-    assert verify_totp(s, far_code) is False
-
-
-def test_totp_replay_tracking_is_per_secret():
-    # Consuming a code on one user's secret must not affect another user's
-    # independently-generated code, even if by coincidence they collide.
-    s1, s2 = new_totp_secret(), new_totp_secret()
-    code1 = pyotp.TOTP(s1).now()
-    assert verify_totp(s1, code1) is True
-    assert verify_totp(s1, code1) is False
-    code2 = pyotp.TOTP(s2).now()
-    assert verify_totp(s2, code2) is True
+    assert totp_step_for(s, far_code) is None
 
 
 def test_tokens_contain_no_characters_that_need_url_escaping():

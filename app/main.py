@@ -23,6 +23,7 @@ module does not touch `/events` or `/healthz` at all -- it only adds to what
 `create_app` already returns.
 """
 
+import os
 import uuid
 
 from fastapi import FastAPI
@@ -47,7 +48,27 @@ from gateway.ledger import Ledger
 # `callback` disagree the moment they land on two different Cloud Run
 # instances, which is exactly the class of bug Task 8b exists to fix
 # (Task 6's per-process TOTP replay dict) rather than reintroduce elsewhere.
+#
+# Fix round 1: a fixed fallback that nothing ever *requires* setting a real
+# secret to override is not a control, it is a comment -- this exact string
+# lives in the source tree, and the source tree is on GitHub. `build_app`
+# below refuses to start on it (raises) unless PLUMBLINE_ENV explicitly
+# says this is not production. PLUMBLINE_ENV, not the incidental "is
+# pytest running" signal `sys.modules` could give: `core/config.py` has no
+# existing env-tier signal to reuse (its GCP_* variables are all
+# project/location values, not a deploy-tier flag), so this is a new,
+# narrowly-scoped one, read directly from the process environment rather
+# than threaded through `PlumblineConfig` -- every test file in this repo
+# that builds its own `PlumblineConfig` by hand (there are several) then
+# gets the same guard behaviour for free from one env var
+# `tests/conftest.py` sets once, at import time, rather than needing every
+# one of those call sites updated individually.
 _INSECURE_DEV_OAUTH_SECRET = "plumbline-dev-oauth-secret-DO-NOT-USE-IN-PRODUCTION"
+# Deploy tiers that may run with no real OAUTH_STATE_SECRET configured.
+# "production" (PLUMBLINE_ENV unset defaults here) is deliberately NOT a
+# member -- an unset PLUMBLINE_ENV on a real Cloud Run deploy must fail
+# closed, not fail open into "looked like dev".
+_OAUTH_SECRET_OPTIONAL_ENVS = frozenset({"test", "dev"})
 
 
 def _on_event(payload: dict) -> None:
@@ -154,6 +175,34 @@ def build_app(config: PlumblineConfig | None = None, repo: Repo | None = None) -
     incidentally through a module-level default.
     """
     cfg = config or load_settings()
+
+    # Checked before anything else is built -- fail fast, with no partial
+    # app object and no collaborators constructed, rather than raising
+    # partway through wiring. See the module-level comment by
+    # `_INSECURE_DEV_OAUTH_SECRET` for the full reasoning; this is the
+    # enforcement of it.
+    deploy_env = os.getenv("PLUMBLINE_ENV", "production")
+    if not cfg.oauth_state_secret and deploy_env not in _OAUTH_SECRET_OPTIONAL_ENVS:
+        # Fail hard, not soft: a signed CSRF state token whose signing key
+        # is a fixed string in the source tree is not a CSRF defence at
+        # all -- anyone who can read this repository (public or not, once
+        # it is ever cloned, forked, or leaked) can forge a validly-signed
+        # `state` and walk straight through app/oauth_routes.py's callback
+        # checks. Refusing to boot is the only thing that reliably stops
+        # this from reaching production merely because OAUTH_STATE_SECRET
+        # was left unset in a Cloud Run env var/Secret Manager binding --
+        # a warning log line is easy to miss; a container that never comes
+        # up is not.
+        raise RuntimeError(
+            "OAUTH_STATE_SECRET is not set and PLUMBLINE_ENV="
+            f"{deploy_env!r} is not one of {sorted(_OAUTH_SECRET_OPTIONAL_ENVS)} -- "
+            "refusing to start with the fixed, source-visible OAuth state "
+            "signing key in what looks like a production environment. Set "
+            "OAUTH_STATE_SECRET (Secret Manager -- never bake it into the "
+            "image), or set PLUMBLINE_ENV=dev for a non-production run "
+            "that accepts the insecure fallback."
+        )
+
     rp = repo or Repo(cfg)
 
     app = create_app(_on_event, "plumbline-api")

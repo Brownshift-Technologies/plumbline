@@ -2,6 +2,23 @@ import os
 import uuid
 
 import pytest
+
+# Explicit, not incidental: `app/main.py`'s `build_app` refuses to start
+# with its fixed, source-visible OAuth state-signing fallback (see that
+# module's `_INSECURE_DEV_OAUTH_SECRET`) unless PLUMBLINE_ENV says this is
+# not production -- and that includes the module-level `app = build_app()`
+# at the bottom of app/main.py, which runs as an import side effect the
+# instant `from app.main import build_app` below executes, well before any
+# fixture (even the autouse `restore_environ` one) has a chance to run.
+# `setdefault`, not a plain assignment: a caller who deliberately runs this
+# suite under a different PLUMBLINE_ENV (CI verifying the guard itself,
+# say) is not overridden. Setting this once, here, is what lets every
+# other test file that builds its own `PlumblineConfig` by hand (there are
+# several -- test_gateway.py, test_ledger.py, test_repo.py, test_sessions.py,
+# test_conftest_fixtures.py) call `build_app` without individually knowing
+# this guard exists at all.
+os.environ.setdefault("PLUMBLINE_ENV", "test")
+
 from fastapi.testclient import TestClient
 
 from app.main import build_app
