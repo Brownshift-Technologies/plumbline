@@ -1,0 +1,14 @@
+export const routes = {
+  signin: "/signin",
+  home: "/",
+  runs: "/runs",
+  run: (id: string) => `/runs/${id}`,
+  runPattern: "/runs/:runId",
+  surface: "/surface",
+  findings: "/findings",
+  behaviours: "/behaviours",
+  agents: "/agents",
+  policy: "/policy",
+  ledger: "/ledger",
+  settings: "/settings",
+} as const;

@@ -1,0 +1,17 @@
+/*
+ * Design tokens — lifted verbatim from plumbline/design/preview.html (:root block).
+ * The design is approved. Do not re-derive these values.
+ */
+:root{
+  --brand:#1F4FD8; --brand-h:#1A43BC; --brand-w:#EEF2FE; --brand-w2:#DFE7FD;
+  --ground:#FDFCFA; --white:#fff;
+  --ink:#1A1A18; --ink2:#3C3C38; --muted:#5F5F59; --faint:#6E6E66;
+  --line:#E7E5E0; --line2:#F0EEEA; --hover:#F6F5F2;
+  --pass:#15794F; --pass-w:#E7F4EE;
+  --fail:#B8362A; --fail-w:#FBECEA;
+  --warn:#94600F; --warn-w:#FBF2E3;
+  --violet:#5B3FBF; --violet-w:#F2F0FC;
+  --r:8px; --r-lg:11px;
+  --sh:0 1px 2px rgba(26,26,24,.05);
+  --sh2:0 2px 8px rgba(26,26,24,.08);
+}
