@@ -155,3 +155,61 @@ def test_a_policy_denial_is_not_swallowed_as_an_unreachable_page():
         gate_rules=({"tool": "browser.read", "pattern": "*", "effect": "deny"},)))
     with pytest.raises(GatewayError):
         Cartographer().run(ctx)
+
+
+# --- fix round 1 --------------------------------------------------------
+
+
+def test_the_whole_crawl_is_one_gateway_call_not_one_per_page(monkeypatch):
+    ctx = make_ctx(pages={
+        "/": {"links": ["/a", "/b"]}, "/a": {"links": ["/c"]},
+        "/b": {"links": []}, "/c": {"links": []},
+    })
+    calls = []
+    real = ctx.gateway.call
+    monkeypatch.setattr(ctx.gateway, "call",
+                         lambda *a, **k: (calls.append(a[2]), real(*a, **k))[1])
+    Cartographer().run(ctx)
+    assert calls.count("browser.read") == 1, (
+        "one ledger entry per page crawled would serialise N transactions on "
+        "one head document -- the same problem this module's own write_all "
+        "argues against, applied to reads")
+
+
+def test_a_protocol_relative_url_is_not_treated_as_internal():
+    # "//evil-cdn.example.com/x" starts with "/" -- a naive prefix check
+    # reads that as internal and walks the crawler off the customer's site
+    # onto an attacker-chosen host.
+    ctx = make_ctx(pages={"/": {"links": ["//evil-cdn.example.com/x", "/cart"]},
+                           "/cart": {"links": []}})
+    out = Cartographer().run(ctx)
+    assert out.data["routes"] == ["/", "/cart"]
+    assert not any(v.startswith("//") for v in ctx.browser.visited)
+
+
+def test_a_javascript_href_is_not_crawled():
+    ctx = make_ctx(pages={"/": {"links": ["javascript:alert(1)", "/cart"]},
+                           "/cart": {"links": []}})
+    out = Cartographer().run(ctx)
+    assert out.data["routes"] == ["/", "/cart"]
+
+
+def test_a_mailto_href_is_not_crawled():
+    ctx = make_ctx(pages={"/": {"links": ["mailto:sales@acme.com", "/cart"]},
+                           "/cart": {"links": []}})
+    out = Cartographer().run(ctx)
+    assert out.data["routes"] == ["/", "/cart"]
+
+
+def test_a_tel_href_is_not_crawled():
+    ctx = make_ctx(pages={"/": {"links": ["tel:+14155550132", "/cart"]},
+                           "/cart": {"links": []}})
+    out = Cartographer().run(ctx)
+    assert out.data["routes"] == ["/", "/cart"]
+
+
+def test_a_data_uri_href_is_not_crawled():
+    ctx = make_ctx(pages={"/": {"links": ["data:text/html,<h1>hi</h1>", "/cart"]},
+                           "/cart": {"links": []}})
+    out = Cartographer().run(ctx)
+    assert out.data["routes"] == ["/", "/cart"]
