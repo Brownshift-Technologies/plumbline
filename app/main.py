@@ -30,6 +30,7 @@ from fastapi import FastAPI
 
 from app.account_routes import router as account_router
 from app.auth_routes import router as auth_router
+from app.finding_routes import router as finding_router
 from app.models import User, Workspace
 from app.oauth_routes import router as oauth_router
 from app.providers import GitHubProvider, GoogleProvider, OktaProvider
@@ -238,6 +239,7 @@ def build_app(config: PlumblineConfig | None = None, repo: Repo | None = None) -
     app.include_router(oauth_router)
     app.include_router(account_router)
     app.include_router(run_router)
+    app.include_router(finding_router)
 
     @app.get("/_health")
     def _health():
