@@ -265,6 +265,30 @@ class Repo:
             return len(self._store.all("artefacts"))
         return len(self._store.query("artefacts", "workspace_id", "==", workspace_id))
 
+    def artefacts_for_spec(self, workspace_id: str, spec_path: str) -> list[Artefact]:
+        """Every artefact (video/trace/har/console) captured for one spec,
+        newest first. Added for Task 12b (Triager): `Store.query` takes
+        exactly one `(field, op, value)` filter (see `core/store.py`'s
+        `query`), so this queries on `spec_path` -- the more selective of
+        the two fields a caller has -- and filters `workspace_id` client
+        side, the same trade `runs_for_workspace` and `steps_for_run`
+        already make by sorting client side after a single-field query.
+        Two workspaces are most unlikely to share a literal spec path
+        (`specs/checkout.spec.ts`), but tenancy is enforced here regardless
+        rather than assumed.
+
+        Newest-first (`created_at` descending) so a caller that only wants
+        the CURRENT trace/HAR for a spec -- Triager reading what the most
+        recent run captured, not every run this spec has ever failed in --
+        can just take the first entry of each kind without also having to
+        sort or de-duplicate by `kind` itself.
+        """
+        rows = [Artefact(**r) for r in self._store.query("artefacts", "spec_path", "==", spec_path)]
+        return sorted(
+            (a for a in rows if a.workspace_id == workspace_id),
+            key=lambda a: a.created_at, reverse=True,
+        )
+
     # sessions ------------------------------------------------------------
     def put_session(self, s: Session) -> None:
         self._store.put("sessions", s.id, to_dict(s))

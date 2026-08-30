@@ -94,7 +94,16 @@ SCOPES: dict[str, frozenset[str]] = {
     "healer":       frozenset({"repo.write:specs", "trace.read"}),
     "chaos":        frozenset({"net.fault", "env.write"}),
     "runner":       frozenset({"browser.drive", "artefact.write"}),
-    "triager":      frozenset({"trace.read", "repo.read"}),
+    # "repo.write:findings" added for Task 12b -- the original set here had
+    # no write tool at all for an agent whose entire job is persisting a
+    # `Finding` per distinct failure (see agents/triager.py's module
+    # docstring). Every other write in this fleet (Cartographer's routes,
+    # Author's/Healer's specs, Runner's artefacts) already goes through a
+    # scoped, ledgered gateway call rather than a bare `ctx.repo.put_*`; a
+    # Finding -- which drives whether Surgeon ever attempts a patch -- is
+    # exactly the kind of consequential write that belongs in the audit
+    # trail too, not an exception to the pattern every other agent follows.
+    "triager":      frozenset({"trace.read", "repo.read", "repo.write:findings"}),
     "surgeon":      frozenset({"repo.write:src", "pr.open", "pr.merge"}),
     # Added in Task 9's fix round 1: these four exist in the fleet (Task 9's
     # brief names all eleven) but were left out of SCOPES because Task 9's
