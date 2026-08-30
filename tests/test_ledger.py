@@ -1,3 +1,4 @@
+import core.fakes as fakes
 from gateway.ledger import Ledger
 from app.repo import Repo
 from app.settings import PlumblineConfig
@@ -158,11 +159,42 @@ def test_verify_returns_false_not_raise_on_missing_field():
     assert lg.verify("ws1") is False
 
 
-def test_verify_returns_false_not_raise_on_non_string_signature():
+def test_verify_returns_false_on_a_plain_non_string_signature():
+    # `!=` never raises comparing a str to an int, so this one would pass
+    # even with the isinstance() guard deleted -- it's here to pin that a
+    # mundane type-confused signature (an int landing where a hex string
+    # belongs) is rejected, not to exercise the guard itself. See
+    # test_verify_rejects_a_signature_object_that_lies_about_equality below
+    # for a case where the guard is the only thing standing between a
+    # forged entry and a false "verified".
     lg = _ledger()
     lg.append("ws1", "runner", "run.step", {"i": 0})
     entry = lg.entries("ws1")[0]
     lg._repo.store.put("ledger", entry["id"], {**entry, "signature": 12345})
+    assert lg.verify("ws1") is False
+
+
+def test_verify_rejects_a_signature_object_that_lies_about_equality():
+    # Storage is just a dict -- nothing stops a "signature" from being an
+    # object instead of a string. An object whose __eq__ always returns
+    # True defeats a bare `!=` comparison: `computed_sig != signature`
+    # falls back to `signature.__ne__(computed_sig)` (str doesn't know how
+    # to compare itself to this type), which Python derives from __eq__ as
+    # `not True` = False -- i.e. "equal", no matter what the real signature
+    # is. That is exactly what verify()'s isinstance(signature, str) check
+    # exists to block *before* any such comparison runs. Delete that check
+    # and this test fails, unlike the plain-int case above.
+    class _AlwaysEqual:
+        def __eq__(self, other):
+            return True
+
+        def __hash__(self):
+            return 0
+
+    lg = _ledger()
+    lg.append("ws1", "runner", "run.step", {"i": 0})
+    entry = lg.entries("ws1")[0]
+    lg._repo.store.put("ledger", entry["id"], {**entry, "signature": _AlwaysEqual()})
     assert lg.verify("ws1") is False
 
 
@@ -174,3 +206,68 @@ def test_verify_returns_false_not_raise_on_unserialisable_detail():
     entry = lg.entries("ws1")[0]
     lg._repo.store.put("ledger", entry["id"], {**entry, "detail": {"bad": {1, 2, 3}}})
     assert lg.verify("ws1") is False
+
+
+# --- fix round 1: transactional append + redaction -----------------------
+
+
+def test_append_redacts_actor_action_and_detail_before_signing():
+    # actor/action/detail are free-form data an agent can put anything into.
+    # They must be redacted before they land in an append-only, queryable
+    # collection -- and the signature must cover what's actually stored, or
+    # verify() would fail on every entry the moment redaction changed
+    # anything.
+    lg = _ledger()
+    lg.append(
+        "ws1",
+        "reach sam@example.com",
+        "note sam@example.com",
+        {"note": "email sam@example.com", "nested": {"contact": "sam@example.com"}},
+    )
+    entry = lg.entries("ws1")[0]
+    assert entry["actor"] == "reach [EMAIL]"
+    assert entry["action"] == "note [EMAIL]"
+    assert entry["detail"] == {"note": "email [EMAIL]", "nested": {"contact": "[EMAIL]"}}
+    assert lg.verify("ws1") is True
+
+
+def test_concurrent_appends_to_one_workspace_do_not_fork_the_chain():
+    # Mirrors tests/test_core_store.py::test_two_interleaved_appends_both_survive,
+    # for the failure this task's review sharpened: append_audit's race
+    # *drops* a write and leaves a consistent trail; Ledger.append's race
+    # (before this fix) could FORK the chain -- two entries, same seq, each
+    # individually validly signed, and nothing but verify() would ever
+    # notice.
+    #
+    # Writer A reads the ws1 head pointer inside its transaction; before A
+    # writes anything, writer B runs a whole append to completion against
+    # the same (still-empty) head. A's commit must then abort -- the head
+    # version it read is stale -- and the decorator re-runs A's transaction
+    # against the head B just wrote, landing A at seq=1 chained from B's
+    # signature rather than forking a second seq=0.
+    fake = FakeFirestore()
+    lg_a = Ledger(Repo(_config(), client=fake))
+    lg_b = Ledger(Repo(_config(), client=fake))
+
+    original_get = fakes.FakeDoc.get
+    interleaved = []
+
+    def get_then_let_the_other_writer_in(self, transaction=None):
+        snapshot = original_get(self, transaction=transaction)
+        if self._path == "plumbline_ledger_head/ws1" and not interleaved:
+            interleaved.append(True)
+            lg_b.append("ws1", "b", "race.b", {})
+        return snapshot
+
+    fakes.FakeDoc.get = get_then_let_the_other_writer_in
+    try:
+        lg_a.append("ws1", "a", "race.a", {})
+    finally:
+        fakes.FakeDoc.get = original_get
+
+    assert interleaved == [True], "the interleaving never happened"
+    entries = lg_a.entries("ws1")
+    assert [e["seq"] for e in entries] == [0, 1]
+    assert [e["actor"] for e in entries] == ["b", "a"]  # b's commit landed first
+    assert entries[1]["prev"] == entries[0]["signature"]
+    assert lg_a.verify("ws1") is True

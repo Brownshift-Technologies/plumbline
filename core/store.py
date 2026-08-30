@@ -207,6 +207,24 @@ class Store:
         results = collection_ref.where(filter=FieldFilter(field, op, value)).stream()
         return [doc.to_dict() for doc in results]
 
+    def doc(self, collection: str, doc_id: str):
+        """A raw (prefixed) document reference for a caller that needs
+        transactional get/set across more than one document -- `put`/`get`
+        each cover exactly one document with no atomicity between them.
+
+        Currently used only by the Ledger's head-pointer transaction
+        (gateway/ledger.py), which reads and writes a `ledger_head` document
+        alongside a `ledger` entry document in the same transaction so two
+        concurrent appends cannot both win the same `seq`.
+        """
+        return self._client.collection(self._name(collection)).document(doc_id)
+
+    def transaction(self):
+        """A new Firestore transaction, for use with `doc()` and
+        `@firestore.transactional` (see `append_audit` below for the pattern,
+        and gateway/ledger.py for a second, generic use of it)."""
+        return self._client.transaction()
+
     def append_audit(self, run_id: str, entry: dict) -> None:
         # Deferred like the imports above, so importing core.store needs
         # no GCP credentials.
