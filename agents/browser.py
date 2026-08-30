@@ -236,6 +236,12 @@ class FakeBrowser:
     codebase (`gateway/policy.py`'s missing-target gate, `gateway/gateway.py`'s
     missing-target check) makes the same call for the same reason: an
     ambiguous "we don't know" must never collapse to "allowed"/"passed".
+
+    A value in `spec_results` is normally a single `dict`, returned
+    verbatim on every call for that path. Task 11b's addition: a `list` of
+    dicts is instead a SEQUENCE, popped one result per call -- see
+    `run_spec`'s own docstring for why Healer's "verify a repair by
+    re-running the spec" contract needs that.
     """
 
     def __init__(self, pages: dict, spec_results: dict | None = None):
@@ -288,7 +294,30 @@ class FakeBrowser:
 
     def run_spec(self, path: str) -> dict:
         if path in self._spec_results:
-            return copy.deepcopy(self._spec_results[path])
+            seeded = self._spec_results[path]
+            # A `list` (added for Task 11b's Healer) is a SEQUENCE of
+            # results for repeated calls against the same path, popped in
+            # order -- the same "scripted responses, consumed one at a
+            # time" idea `core.fakes.FakeModel` already uses for
+            # `generate()`. Healer's whole contract is "draft a repair,
+            # then re-run the spec to see if it now passes": that needs
+            # `run_spec(path)` to answer differently the second time it is
+            # called for the same path within one test, which a single
+            # static dict value can never do. Once the list is down to its
+            # last entry it keeps being returned rather than raising (unlike
+            # `FakeModel`, which asserts on exhaustion) -- a spec a test
+            # calls a third time was not a mistake the way a third
+            # unscripted model call would be; the fixture just did not
+            # bother scripting a distinct outcome past the second call.
+            # A bare `dict` (every pre-Task-11b caller) is untouched:
+            # `isinstance(seeded, list)` is False for it, so it falls
+            # through to the same `deepcopy` return as always.
+            if isinstance(seeded, list):
+                if not seeded:
+                    return {"passed": False, "error": f"no more results seeded for {path!r}"}
+                result = seeded.pop(0) if len(seeded) > 1 else seeded[0]
+                return copy.deepcopy(result)
+            return copy.deepcopy(seeded)
         return {"passed": False, "error": f"no result seeded for {path!r}"}
 
 
