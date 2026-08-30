@@ -34,16 +34,25 @@ is not the clean tree the given spec's own test fixtures model:
    seen) so its own, real content still gets crawled on its own visit --
    never borrowed from the alias page that redirected to it.
 2. **A discovered href is filtered through `_internal_href`, not a bare
-   `.startswith("/")` check** (fix round 1). `"/"` alone is not enough:
-   `"//evil-cdn.example.com/x".startswith("/")` is ALSO `True` -- that is a
-   protocol-relative URL, browsers resolve it against the CURRENT scheme
-   onto a completely different host, and nothing upstream (a real
-   `PlaywrightDriver.links()` hands back the raw href, unfiltered) would
-   have caught an agent walking off the customer's site onto an
-   attacker-chosen one. `javascript:`, `mailto:`, `tel:`, and `data:` hrefs
-   are excluded for a different reason -- none of them is a route at all,
-   crawling one would either do nothing, open a mail client, or hand
-   Cartographer a data: URI to "visit". See `_internal_href`.
+   `.startswith("/")` check** (fix round 1, then hardened in fix round 2).
+   `"/"` alone is not enough: `"//evil-cdn.example.com/x".startswith("/")`
+   is ALSO `True` -- that is a protocol-relative URL, browsers resolve it
+   against the CURRENT scheme onto a completely different host, and
+   nothing upstream (a real `PlaywrightDriver.links()` hands back the raw
+   href, unfiltered) would have caught an agent walking off the customer's
+   site onto an attacker-chosen one. `javascript:`, `mailto:`, `tel:`, and
+   `data:` hrefs are excluded for a different reason -- none of them is a
+   route at all, crawling one would either do nothing, open a mail client,
+   or hand Cartographer a data: URI to "visit". Round 1 checked the raw
+   href against these rules directly, which tests a DIFFERENT string than
+   the one a browser actually fetches: `"/\\evil.com"` (WHATWG treats `\`
+   as `/` for http/https, so this resolves exactly like `//evil.com`) and
+   `"/\t/evil.com"` / a zero-width-space variant (the WHATWG URL parser
+   strips ASCII tab/CR/LF before parsing, collapsing this to `//evil.com`
+   too) both slipped past round 1's filter unchanged. `_internal_href` now
+   normalises the way a browser's URL parser does -- strip, then fold
+   backslashes, then check -- before applying any of these rules. See
+   `_internal_href`.
 3. **A fragment never triggers a new page load.** `/catalog#reviews` and
    `/catalog` are the same route by construction -- an in-page anchor jump,
    never a fresh navigation -- so the fragment is stripped (inside
@@ -80,29 +89,70 @@ from app.models import Route
 MAX_ROUTES = 300
 
 # Never a route on THIS app -- see point 2 in the module docstring. Matched
-# case-insensitively against the START of the href; a real browser treats
-# "JavaScript:" and "javascript:" identically.
+# against the START of the normalised, lower-cased href -- `_internal_href`
+# lower-cases a SEPARATE copy for this comparison only; the path it
+# eventually returns keeps the href's original case.
 _NON_ROUTE_SCHEMES = ("javascript:", "mailto:", "tel:", "data:")
+
+# Characters the WHATWG URL parser strips from anywhere in the input
+# BEFORE it ever looks at scheme or authority -- ASCII tab, CR, LF, and
+# (browsers extend the spec's C0-control stripping to this one Unicode
+# character in practice) the zero-width space. A crawler that filters the
+# raw href is filtering a string the browser never actually parses; an
+# attacker inserts one of these between the two slashes of what would
+# otherwise be an obviously-external `//host` and the naive filter never
+# sees it.
+_STRIP_CHARS = ("\t", "\r", "\n", "​")
 
 
 def _internal_href(href: str) -> str | None:
     """The normalised, same-origin path `href` names, or `None` if it is
     not a route this crawl should ever queue.
 
-    Order matters: a protocol-relative URL (`//host/path`) MUST be
-    rejected before the bare `href.startswith("/")` check below, because
-    it would otherwise pass that check -- a leading `//` reads as
-    "internal" under a naive prefix test, but a real browser resolves it
-    against the current scheme onto `host`, not onto this app. Checked
-    before the scheme list too, since `//` is itself effectively a scheme
-    marker (protocol-relative), not a path.
+    Fix round 2: normalise the way a browser's URL parser does BEFORE
+    applying any rule, not after -- checking the raw href tests a
+    different string than the one that actually gets fetched. In order:
+    strip every character in `_STRIP_CHARS` from anywhere in the string
+    (not just the edges -- `"/\t/evil.com"` has the tab in the middle,
+    exactly where it needs to be to hide `//evil.com` from a naive
+    prefix check); fold every backslash to a forward slash (WHATWG: for
+    http/https and the other "special" schemes, `\` is equivalent to `/`
+    everywhere in the URL, not only at the start -- so `"/\evil.com"`
+    resolves identically to `"//evil.com"`, and a `\` that survives
+    folding inside an otherwise-ordinary path, e.g. `"/a\b"` -> `"/a/b"`,
+    is exactly what a browser would also do with it, not a special case).
+    Only THEN do the existing `//`, scheme, and fragment checks below run,
+    against the normalised string.
+
+    Order matters within the checks themselves too: a protocol-relative
+    URL (`//host/path`) MUST be rejected before the bare
+    `stripped.startswith("/")` check, because it would otherwise pass that
+    check -- a leading `//` reads as "internal" under a naive prefix test,
+    but a real browser resolves it against the current scheme onto
+    `host`, not onto this app. Checked before the scheme list too, since
+    `//` is itself effectively a scheme marker (protocol-relative), not a
+    path.
+
+    Deliberately NOT percent-decoded: `"%2f%2fevil.com"` stays same-origin
+    on purpose, because browsers do not percent-decode a relative
+    reference before resolving it against the current document -- treating
+    an encoded `//` as if it were a literal one would reject hrefs that
+    are genuinely internal (a path segment that happens to contain an
+    encoded slash is not a host boundary at all).
     """
-    if not href or href.startswith("//"):
+    if not href:
         return None
-    lowered = href.lower()
+    normalised = href
+    for ch in _STRIP_CHARS:
+        normalised = normalised.replace(ch, "")
+    normalised = normalised.replace("\\", "/")
+
+    if normalised.startswith("//"):
+        return None
+    lowered = normalised.lower()
     if any(lowered.startswith(scheme) for scheme in _NON_ROUTE_SCHEMES):
         return None
-    stripped = href.split("#", 1)[0]  # point 3: a fragment is never a new page
+    stripped = normalised.split("#", 1)[0]  # point 3: a fragment is never a new page
     return stripped if stripped.startswith("/") else None
 
 

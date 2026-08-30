@@ -213,3 +213,60 @@ def test_a_data_uri_href_is_not_crawled():
                            "/cart": {"links": []}})
     out = Cartographer().run(ctx)
     assert out.data["routes"] == ["/", "/cart"]
+
+
+# --- fix round 2: _internal_href must normalise before it decides --------
+#
+# The reviewer defeated round 1's filter with two encodings of the same
+# off-origin URL, verified by calling the shipped function directly rather
+# than only through a full crawl -- these tests do the same, against
+# _internal_href itself, so the exact bypass string is pinned in the
+# assertion rather than buried inside a page fixture.
+
+
+from agents.cartographer import _internal_href
+
+
+def test_a_backslash_scheme_relative_href_is_external():
+    # WHATWG: "\" is equivalent to "/" for http/https, everywhere in the
+    # URL -- "/\evil.com" resolves identically to "//evil.com".
+    assert _internal_href("/\\evil.com") is None
+
+
+def test_a_tab_inside_a_scheme_relative_href_is_external():
+    # The WHATWG URL parser strips ASCII tab before parsing, collapsing
+    # this to "//evil.com" -- the tab sits between the two slashes
+    # specifically to hide from a naive prefix check.
+    assert _internal_href("/\t/evil.com") is None
+
+
+def test_a_zero_width_space_inside_a_scheme_relative_href_is_external():
+    assert _internal_href("/​/evil.com") is None
+
+
+def test_a_carriage_return_inside_a_scheme_relative_href_is_external():
+    assert _internal_href("/\r/evil.com") is None
+
+
+def test_a_backslash_in_a_legitimate_path_still_resolves_internal():
+    # Guards against over-correcting: a backslash that is NOT at the
+    # scheme-relative position is folded to a forward slash (the same
+    # thing a browser's URL parser does with it) and the route still
+    # crawls normally -- it must not be excluded outright.
+    assert _internal_href("/catalog\\clearance") == "/catalog/clearance"
+
+
+def test_percent_encoded_slashes_are_not_treated_as_a_bypass():
+    # Browsers do not percent-decode a relative reference before
+    # resolving it -- "%2f%2fevil.com" stays same-origin, and this
+    # particular string is excluded only because it does not start with
+    # "/" at all (no leading slash), not because of any percent-decoding
+    # this function deliberately does not do.
+    assert _internal_href("%2f%2fevil.com") is None
+
+
+def test_a_crawl_does_not_follow_a_tab_hidden_off_origin_link():
+    ctx = make_ctx(pages={"/": {"links": ["/\t/evil-cdn.example.com/x", "/cart"]},
+                           "/cart": {"links": []}})
+    out = Cartographer().run(ctx)
+    assert out.data["routes"] == ["/", "/cart"]
