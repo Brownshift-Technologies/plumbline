@@ -34,8 +34,10 @@ from app.models import User, Workspace
 from app.oauth_routes import router as oauth_router
 from app.providers import GitHubProvider, GoogleProvider, OktaProvider
 from app.repo import Repo
+from app.run_routes import router as run_router
 from app.sessions import SessionService
 from app.settings import PlumblineConfig, load_settings
+from core.events import enqueue_job
 from core.telemetry import log_event
 from core.web import create_app
 from gateway.gateway import Gateway
@@ -225,10 +227,17 @@ def build_app(config: PlumblineConfig | None = None, repo: Repo | None = None) -
         "okta": OktaProvider(cfg),
     }
     app.state.deliver_reset_email = _deliver_reset_email_default
+    # `POST /api/runs` (Task 14a) enqueues a Cloud Run Job execution rather
+    # than running the fleet in-process -- see app/run_routes.py's module
+    # docstring. Injectable on `app.state`, the same pattern as
+    # `seed_demo_if_missing`/`deliver_reset_email` just above, so tests can
+    # swap in a stub that never resolves real GCP credentials.
+    app.state.enqueue_job = lambda job_name, args: enqueue_job(cfg, job_name, args)
 
     app.include_router(auth_router)
     app.include_router(oauth_router)
     app.include_router(account_router)
+    app.include_router(run_router)
 
     @app.get("/_health")
     def _health():

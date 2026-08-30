@@ -76,3 +76,38 @@ def is_demo(sess=Depends(current_session)) -> bool:
     reference implementation every write-capable route after this task
     follows."""
     return sess.is_demo
+
+
+def require_write_role(*roles):
+    """Like `require_role`, but for a route that also has to accept a demo
+    session -- Task 14a onward's write-capable routes (`POST /api/runs`,
+    approving a patch, editing gate rules, ...).
+
+    A demo session's `user_id` ("demo") holds no `Membership` row in any
+    workspace -- there was never an account to attach one to (see
+    `current_user`'s own docstring) -- so `require_role`'s plain
+    `role_of(...) not in roles` check would 403 EVERY demo session on
+    EVERY write route, unconditionally, before the route body ever gets a
+    chance to return the `{"demo": True, "persisted": False}` shape
+    `app/auth_routes.py`'s `change_password` establishes as the contract
+    for a demo write. That is wrong twice over: a demo visitor is supposed
+    to see writes "succeed" (harmlessly), not get turned away with a 403
+    that reads like a bug in the demo.
+
+    This dependency defers entirely to the route body for a demo session
+    (returns `None` without ever calling `role_of`) -- the body is
+    expected to check `sess.is_demo` FIRST and return the no-op shape
+    before it does anything else, exactly like `change_password` does.
+    For a real session, this behaves exactly like `require_role`: 403
+    unless the caller's role is one of `roles`.
+    """
+
+    def check(request: Request, sess=Depends(current_session)):
+        if sess.is_demo:
+            return None
+        role = request.app.state.repo.role_of(sess.user_id, sess.workspace_id)
+        if role not in roles:
+            raise HTTPException(403, f"needs one of {roles}")
+        return role
+
+    return check
