@@ -76,7 +76,14 @@ export function Findings() {
       <div className="pagehead" style={{ display: "flex", alignItems: "flex-end", gap: 16 }}>
         <div>
           <h1>Findings</h1>
-          <p>{rows.length} open. Ordered by how much of the product they touch.</p>
+          {/* Counts OPEN findings, matching the sidebar badge, which reads
+              /api/summary and excludes accepted ones. This said
+              `rows.length` -- every row including the accepted ones -- so
+              the page claimed 7 while the nav next to it said 6. */}
+          <p>
+            {rows.filter((f) => f.status !== "accepted").length} open. Ordered by how much of
+            the product they touch.
+          </p>
         </div>
         <span className="sp" />
         <Button size="sm" onClick={() => setFilterOpen((o) => !o)} aria-expanded={filterOpen}>

@@ -194,6 +194,114 @@ def _seed_routes(repo, ws_id: str) -> None:
     repo.store.put_many("routes", [(r.id, to_dict(r)) for r in routes])
 
 
+
+# What a behaviour actually reads like: one claim, on one route, that a
+# person could check by hand. Cycled per route by `_seed_behaviours`.
+_GENERIC_PHRASINGS = (
+    "The page renders without a console error",
+    "Every interactive control has an accessible name",
+    "A slow response shows a loading state, not a blank screen",
+    "The primary action stays reachable by keyboard alone",
+    "A failed request surfaces a message, not a silent no-op",
+    "Going back restores the previous state",
+)
+
+_PHRASINGS = {
+    "/": (
+        "The homepage renders its main heading",
+        "A signed-out visitor sees a way to sign in",
+        "The primary call to action is reachable by keyboard",
+        "Search returns to the homepage cleanly when cleared",
+    ),
+    "/catalog": (
+        "A search with no matches explains that, rather than showing an empty grid",
+        "Filters combine rather than replace one another",
+        "Pagination keeps the chosen filters",
+        "A product with no image still lays out correctly",
+        "Sorting by price orders low to high",
+    ),
+    "/catalog/:sku": (
+        "An out-of-stock item cannot be added to the cart",
+        "Switching variant updates the price shown",
+        "The gallery is navigable by keyboard",
+        "A missing SKU returns a not-found page, not a crash",
+    ),
+    "/cart": (
+        "Removing the last item shows the empty-cart state",
+        "Quantity cannot be set below one",
+        "The total matches the sum of the line items",
+        "A promo code that has expired is refused with a reason",
+        "Refreshing the page keeps the cart intact",
+    ),
+    "/cart/promo": (
+        "An invalid promo code leaves the total unchanged",
+        "Two promo codes cannot stack unless the rules allow it",
+        "The discount shows as its own line, not folded into the subtotal",
+    ),
+    "/checkout": (
+        "A guest can reach payment without creating an account",
+        "The order summary matches the cart it came from",
+        "Leaving and returning keeps the entered address",
+        "An unsupported shipping country is refused before payment",
+    ),
+    "/checkout/payment": (
+        "A customer who retries a slow payment is only charged once",
+        "A declined card shows the issuer's reason, not a generic error",
+        "The card field never appears in the page source or a log line",
+        "Submitting twice quickly does not create two orders",
+        "A 3-D Secure step-up returns to the same order",
+        "An expired session at payment does not lose the cart",
+    ),
+    "/checkout/review": (
+        "The review step shows the final total including tax",
+        "Editing the address returns to review with the change applied",
+        "Placing the order twice from the back button is refused",
+    ),
+    "/checkout/invoice": (
+        "An invoice is downloadable only by the account that placed the order",
+        "The invoice total matches the captured amount",
+    ),
+    "/checkout/3ds": (
+        "A cancelled 3-D Secure challenge returns to payment, not to an error page",
+        "A timed-out challenge does not capture the payment",
+    ),
+    "/account": (
+        "The account page shows only this customer's orders",
+        "Signing out returns to a signed-out homepage",
+        "A deleted payment method disappears without a reload",
+    ),
+    "/account/security": (
+        "Changing a password signs out every other session",
+        "Two-factor enrolment refuses a reused code",
+        "A password reset link cannot be used twice",
+        "The active-sessions list names the current device",
+    ),
+    "/account/orders": (
+        "Order history is ordered newest first",
+        "An order with no shipment still renders its status",
+        "Pagination stops at the last page",
+    ),
+    "/auth/login": (
+        "A wrong password does not reveal whether the email exists",
+        "Five failed attempts rate-limit further tries",
+        "A signed-in visitor is redirected away from the login page",
+    ),
+    "/auth/reset": (
+        "A reset request for an unknown email says the same thing as one for a known email",
+        "The reset form refuses a password under the minimum length",
+    ),
+    "/admin/pricing": (
+        "A non-admin cannot open the pricing table",
+        "A price change is written to the audit ledger",
+        "Sorting the table is stable across equal values",
+    ),
+    "/admin/pricing/bulk": (
+        "A bulk upload with a duplicate SKU is refused as a whole",
+        "A malformed row names its line number in the error",
+    ),
+}
+
+
 def _seed_behaviours(repo, ws_id: str) -> None:
     """342 individual `repo.put_behaviour` calls -- 342 Firestore round
     trips -- is exactly the shape of loop `gateway/ledger.py`'s
@@ -213,10 +321,19 @@ def _seed_behaviours(repo, ws_id: str) -> None:
         elif path.startswith("/account/security"):
             tags = ("security",)
         slug = _route_id(ws_id, path)
+        # Route-specific sentences, cycled, rather than
+        # f"{path} keeps working under normal use (#{i + 1})" repeated.
+        # This is the Behaviours screen's entire content and one of the
+        # screens a demo lands on: 342 rows of the same sentence with a
+        # counter on the end read as placeholder data and undercut the
+        # claim the product is built on -- that a behaviour is one thing,
+        # in plain English, that either holds or does not.
+        phrasings = _PHRASINGS.get(path, _GENERIC_PHRASINGS)
         behaviours.extend(
             Behaviour(
                 id=f"beh_demo_{slug}_{i}", workspace_id=ws_id,
-                text=f"{path} keeps working under normal use (#{i + 1})",
+                text=phrasings[i % len(phrasings)] if i < len(phrasings)
+                else f"{phrasings[i % len(phrasings)]} ({i // len(phrasings) + 1})",
                 route=path, tags=tags, source="author",
             )
             for i in range(count)

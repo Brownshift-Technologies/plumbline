@@ -110,7 +110,10 @@ export function Agents() {
       <div className="pagehead" style={{ display: "flex", alignItems: "flex-end", gap: 16 }}>
         <div>
           <h1>Agents</h1>
-          <p>Seven specialists. Each one has a scoped set of tools and nothing more.</p>
+          <p>
+            {agents.status === "success" ? `${rows.length} specialists` : "Specialists"}. Each
+            one has a scoped set of tools and nothing more.
+          </p>
         </div>
         <span className="sp" />
         <Button
