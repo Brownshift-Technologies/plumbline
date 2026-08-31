@@ -36,6 +36,61 @@ RUN pip install --no-cache-dir uv \
 # system dependencies -- both are already true at this point in the build.
 RUN playwright install --with-deps chromium
 
+# Node -- installed from the official upstream binary tarball, NOT via
+# `apt-get install nodejs npm`. Tried that first: Debian's own `npm`
+# package drags in dozens of unrelated node-* packages as transitive
+# dependencies of ITS OWN packaging -- eslint, webpack, gyp, postcss,
+# chokidar, and well over 250 more -- none of which this image has any use
+# for; confirmed by actually building with it once and watching apt queue
+# >300 packages before switching to this. The upstream tarball is exactly
+# `node` + the `npm`/`npx` it bundles, nothing else. Fetched with `python3`
+# (already in this image; no `curl` needed just for one download) rather
+# than adding another apt package for the sole purpose of fetching one
+# file.
+ENV NODE_VERSION=24.20.0
+RUN python3 -c "import urllib.request; urllib.request.urlretrieve('https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.gz', '/tmp/node.tar.gz')" \
+ && tar -xzf /tmp/node.tar.gz -C /usr/local --strip-components=1 \
+ && rm /tmp/node.tar.gz \
+ && node --version && npm --version
+
+# The Playwright TEST RUNNER -- a separate Node CLI (`npx playwright test`)
+# from the Python bindings installed above, and the thing
+# `agents/browser.py`'s `PlaywrightDriver.run_spec` actually shells out to
+# (there is no Python API that runs an arbitrary `.spec.ts` FILE the way
+# Playwright's own test runner does; see that method's own docstring).
+# Installed to a FIXED path (`/opt/playwright-test`), not a bare `npm
+# install -g`, so `_ensure_local_playwright_test` can symlink it into any
+# checkout that brought no Playwright deps of its own -- see that
+# function's docstring for why a symlinked `node_modules`, not `NODE_PATH`,
+# is what a checkout with no local install needs (two separate installs of
+# the identical version do not interoperate: verified, see the task
+# report).
+#
+# Pinned to the EXACT version `uv pip install` just resolved for the
+# Python `playwright` package above, not a separate floor of its own:
+# Playwright ships its Python/Node/Java/.NET bindings from one monorepo in
+# lockstep, so identical version strings share an identical Chromium BUILD
+# REVISION -- verified locally (a mismatched Node version fails outright
+# with "Executable doesn't exist at .../chromium-<old revision>/chrome-
+# linux/chrome"; a matched one reuses the exact browser `playwright
+# install` just downloaded, no second fetch). That is what keeps this
+# image from paying for a second, near-duplicate ~170MB Chromium download
+# just for the Node side.
+RUN PW_VERSION="$(python3 -c 'from importlib.metadata import version; print(version("playwright"))')" \
+ && mkdir -p /opt/playwright-test \
+ && cd /opt/playwright-test \
+ && npm init -y >/dev/null \
+ && npm install --no-save --no-audit --no-fund "@playwright/test@${PW_VERSION}"
+
+# `PLUMBLINE_PLAYWRIGHT_TEST_HOME` is `agents/browser.py`'s own env var
+# (`PLAYWRIGHT_TEST_HOME_ENV`) naming where `_ensure_local_playwright_test`
+# finds a shared install to symlink in. The `PATH` addition is a secondary
+# convenience (a plain `npx playwright` from anywhere in the image resolves
+# without needing a checkout's own symlink at all); `run_spec`'s real
+# resolution path is the symlink, not this.
+ENV PLUMBLINE_PLAYWRIGHT_TEST_HOME=/opt/playwright-test/node_modules
+ENV PATH="/opt/playwright-test/node_modules/.bin:${PATH}"
+
 # Only what job/worker.py's own import chain reaches (see that module's
 # docstring, and job/orchestrator.py's, for the full list): job itself,
 # plus app/core/gateway/agents. No `seed/` (never imported by this path)
