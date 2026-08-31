@@ -67,6 +67,26 @@ async function request<T>(path: string, init: RequestOptions = {}): Promise<T> {
     throw new ApiError(res.status, messageFor(res.status, parsed), parsed);
   }
 
+  // A 200 whose body is a plain string is almost never a real API
+  // response. It is what the SPA catch-all in app/production.py returns
+  // for ANY /api path with no route behind it: index.html, status 200,
+  // Content-Type text/html. parseBody's JSON.parse fails and hands the raw
+  // markup back, which then reaches a component and dies as
+  // "t.map is not a function" -- a render crash that takes the whole app
+  // down with a stack trace, three layers away from the actual cause,
+  // which is a frontend path the backend never had.
+  //
+  // /api/billing/invoices did exactly this. Failing loudly here turns a
+  // route typo into an ordinary, recoverable error state on one panel,
+  // with a message naming the path.
+  if (typeof parsed === "string") {
+    throw new ApiError(
+      res.status,
+      `${path} did not return JSON. If this is a 200, the API route probably does not exist and the SPA fallback served index.html instead.`,
+      parsed,
+    );
+  }
+
   return parsed as T;
 }
 

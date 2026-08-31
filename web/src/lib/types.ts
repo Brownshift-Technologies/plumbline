@@ -13,6 +13,8 @@ export interface CurrentUser {
   is_demo: boolean;
   workspace_id: string;
   role: Role;
+  /** Profile photo as a `data:` URI, or "" for none -- render initials. */
+  photo_url?: string;
   /**
    * Whether this user has a CONFIRMED (not merely pending) TOTP secret --
    * see app/models.py's User.totp_secret vs totp_pending_secret. Not part

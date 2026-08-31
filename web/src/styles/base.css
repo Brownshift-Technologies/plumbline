@@ -259,3 +259,9 @@ tbody tr:hover{background:#FBFAF8;cursor:pointer}
 .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:var(--ink);color:#fff;
        padding:10px 16px;border-radius:9px;font-size:14px;font-weight:500;box-shadow:var(--sh2);z-index:50;
        display:flex;align-items:center;gap:9px}
+
+/* Profile photo inside the round .avatar chip (TopBar and Settings ->
+   Profile). The chip is a fixed-size circle that otherwise holds two
+   initials, so the image has to fill it and crop rather than letterbox --
+   object-fit:cover, not contain. */
+.avatar-img{width:100%;height:100%;border-radius:inherit;object-fit:cover;display:block}

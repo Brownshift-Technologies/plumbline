@@ -10,11 +10,12 @@ frontend needs and nothing it has to reverse-engineer from an HTTP status
 code alone.
 """
 
+import base64
 import dataclasses
 import time
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel, EmailStr
 
 from app.deps import COOKIE, current_session, demo_refusal
@@ -257,6 +258,7 @@ def me(request: Request, sess=Depends(current_session)):
             "is_demo": True,
             "workspace_id": sess.workspace_id,
             "role": "reader",
+            "photo_url": "",
         }
     user = request.app.state.repo.user(sess.user_id)
     if not user:
@@ -271,7 +273,78 @@ def me(request: Request, sess=Depends(current_session)):
         "is_demo": False,
         "workspace_id": sess.workspace_id,
         "role": request.app.state.repo.role_of(user.id, sess.workspace_id),
+        "photo_url": user.photo_url,
     }
+
+
+MAX_PHOTO_BYTES = 256 * 1024
+_PHOTO_TYPES = {"image/png": "png", "image/jpeg": "jpeg", "image/webp": "webp", "image/gif": "gif"}
+
+
+@router.post("/photo")
+async def upload_photo(request: Request, photo: UploadFile = File(...), sess=Depends(current_session)):
+    """Set the caller's profile photo.
+
+    Stored inline as a `data:` URI on the `User` row -- see
+    `app/models.py`'s `photo_url` for why that rather than a bucket.
+
+    The content type is taken from `imghdr`-style sniffing of the bytes,
+    NOT from the client's `Content-Type` header: a header is attacker
+    controlled, and echoing it straight back into a `data:` URI that the
+    browser then renders is how `image/svg+xml` (which executes script)
+    gets served from our own origin. Only the four raster formats in
+    `_PHOTO_TYPES` are accepted, and SVG is deliberately not one of them.
+    """
+    if sess.is_demo:
+        return demo_refusal("Demo sessions don't have a real account to set a photo on.")
+
+    raw = await photo.read()
+    if not raw:
+        raise HTTPException(400, "that file is empty")
+    if len(raw) > MAX_PHOTO_BYTES:
+        raise HTTPException(
+            413, f"that photo is {len(raw) // 1024} KB -- the limit is {MAX_PHOTO_BYTES // 1024} KB"
+        )
+
+    kind = _sniff_image(raw)
+    if kind is None:
+        raise HTTPException(400, "that file is not a PNG, JPEG, WebP or GIF image")
+
+    repo = request.app.state.repo
+    user = repo.user(sess.user_id)
+    if user is None:
+        raise HTTPException(401, "not signed in")
+    encoded = base64.b64encode(raw).decode("ascii")
+    repo.put_user(dataclasses.replace(user, photo_url=f"data:{kind};base64,{encoded}"))
+    return {"ok": True, "bytes": len(raw)}
+
+
+@router.delete("/photo")
+def remove_photo(request: Request, sess=Depends(current_session)):
+    if sess.is_demo:
+        return demo_refusal("Demo sessions don't have a real account to remove a photo from.")
+    repo = request.app.state.repo
+    user = repo.user(sess.user_id)
+    if user is None:
+        raise HTTPException(401, "not signed in")
+    repo.put_user(dataclasses.replace(user, photo_url=""))
+    return {"ok": True}
+
+
+def _sniff_image(raw: bytes) -> str | None:
+    """Identify an image from its magic bytes, ignoring any client header.
+
+    Returns the MIME type, or None for anything not in `_PHOTO_TYPES`.
+    """
+    if raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if raw.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return "image/webp"
+    if raw[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    return None
 
 
 @router.get("/sessions")

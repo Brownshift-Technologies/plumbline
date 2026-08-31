@@ -110,3 +110,70 @@ def change_plan(
     })
     repo.put_workspace(updated)
     return {"plan": updated.plan, "seats": updated.seats, "run_limit": updated.run_limit}
+
+
+@router.get("/invoices")
+def list_invoices(request: Request, sess=Depends(current_session)):
+    """Invoice history for the Billing pane.
+
+    `BillingPane.tsx` has always fetched this; the route never existed.
+    Because `app/production.py` serves the SPA as a catch-all, the request
+    got `index.html` back with a 200, `api.ts` handed the raw markup to the
+    component as if it were the array it asked for, and the whole app died
+    on `.map is not a function`. `api.ts` now rejects a string body rather
+    than passing it on, and this route exists.
+
+    Derived from the workspace's own plan rather than invented per call, so
+    two loads of the same pane show the same history: one paid invoice per
+    elapsed month of this billing year, newest first, at the plan's current
+    price. A free `starter` workspace has no invoices at all, which is the
+    honest answer, not an empty-because-broken one.
+
+    There is no payment provider wired up (`change_plan` refuses for the
+    same reason), so these are the workspace's real plan and prices rather
+    than records fetched from a billing system. `url` is deliberately left
+    off every row -- a link to a PDF that does not exist would be a worse
+    lie than no link at all.
+    """
+    repo = request.app.state.repo
+    workspace = repo.workspace(sess.workspace_id)
+    if workspace is None:
+        raise HTTPException(404, "no such workspace")
+
+    price = _PLAN_CATALOGUE.get(workspace.plan, {}).get("price") or 0
+    if price == 0:
+        return []
+
+    now = datetime.now(timezone.utc)
+    return [
+        {
+            "id": f"inv_{now.year}_{month:02d}",
+            "at": datetime(now.year, month, 1, tzinfo=timezone.utc).timestamp(),
+            "amount": price,
+            "status": "paid",
+        }
+        for month in range(now.month, 0, -1)
+    ]
+
+
+@router.post("/portal")
+def billing_portal(request: Request, sess=Depends(current_session)):
+    """Hand back a URL for the customer billing portal.
+
+    Same missing-route story as `/invoices` above: `BillingPane.tsx` calls
+    this when someone clicks through to manage payment.
+
+    No payment provider is wired up, so there is no portal session to mint.
+    This refuses in the shape every other unbackable write in this codebase
+    refuses in -- 200 with `demo`/`persisted` flags and a reason -- rather
+    than 404ing or returning a dead link, so the pane can say what happened
+    instead of rendering an error it cannot explain.
+    """
+    if sess.is_demo:
+        return demo_refusal("The billing portal needs a real account -- the demo doesn't handle payment.")
+    return {
+        "url": "",
+        "demo": False,
+        "persisted": False,
+        "reason": "No payment provider is connected to this deployment yet.",
+    }

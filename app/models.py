@@ -42,6 +42,17 @@ class User:
     # user is not -- see `Repo.consume_totp_step`'s docstring for the
     # transactional detail.
     last_used_totp_step: int = 0
+    # The profile photo, stored inline as a `data:` URI rather than in a
+    # bucket. Capped hard at `MAX_PHOTO_BYTES` by the only route that
+    # writes it (`app/auth_routes.py`'s `upload_photo`), which is what
+    # makes inline storage safe: a Firestore document has a 1 MiB ceiling,
+    # and base64 inflates by ~4/3, so the cap has to leave room for the
+    # rest of the row. Chosen over Cloud Storage deliberately -- an avatar
+    # is a few tens of KB, and a bucket would add a second storage system,
+    # its own IAM, its own lifecycle rules and its own bill for something
+    # that fits in the row it belongs to. Empty string means no photo, and
+    # every consumer falls back to initials.
+    photo_url: str = ""
     created_at: float = field(default_factory=time.time)
 
 

@@ -22,6 +22,7 @@ export function ProfilePane({ user }: { user: AsyncState<CurrentUser> }) {
   const [email, setEmail] = useState(user.data?.email ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const photoUrl = user.status === "success" ? user.data?.photo_url ?? "" : "";
   const initials = (user.data?.name ?? "?")
     .split(" ")
     .map((p) => p[0])
@@ -88,7 +89,11 @@ export function ProfilePane({ user }: { user: AsyncState<CurrentUser> }) {
         </div>
         <div style={{ display: "flex", gap: 11, alignItems: "center" }}>
           <span className="avatar" style={{ width: 54, height: 54, fontSize: 17 }}>
-            {initials}
+            {photoUrl ? (
+              <img src={photoUrl} alt="" className="avatar-img" />
+            ) : (
+              initials
+            )}
           </span>
           <input ref={fileInput} type="file" accept="image/*" hidden onChange={onUpload} aria-label="Upload photo" />
           <Button onClick={() => fileInput.current?.click()}>Upload</Button>

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "./Icon";
 import { routes } from "../lib/routes";
+import { useCurrentUser } from "../lib/useCurrentUser";
 
 export interface TopBarProps {
   onOpenNav: () => void;
@@ -17,10 +18,12 @@ export interface TopBarProps {
 function AvatarMenu({
   userInitials,
   userName,
+  userPhoto,
   planUsed,
   planTotal,
   planResetDays,
 }: {
+  userPhoto?: string;
   userInitials: string;
   userName: string;
   planUsed: number;
@@ -61,7 +64,7 @@ function AvatarMenu({
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
       >
-        {userInitials}
+        {userPhoto ? <img src={userPhoto} alt="" className="avatar-img" /> : userInitials}
       </button>
       {open && (
         <div className="avatar-menu" role="menu" aria-label="Account">
@@ -108,13 +111,31 @@ function AvatarMenu({
 export function TopBar({
   onOpenNav,
   navTriggerRef,
-  userInitials = "RK",
-  userName = "Roger Koranteng",
+  userInitials,
+  userName,
   workspace = "acme / storefront",
   planUsed = 184,
   planTotal = 500,
   planResetDays = 12,
 }: TopBarProps) {
+  // The account menu used to render the literals "RK" and "Roger
+  // Koranteng" -- prop defaults from the design prototype that nothing
+  // ever overrode, because AppShell renders <TopBar> with no user props at
+  // all. Every visitor, including every demo visitor, saw somebody else's
+  // name and initials in the corner of every screen. The props are kept as
+  // overrides (the prototype and the component tests pass them), but the
+  // real session is the default now.
+  const { data } = useCurrentUser();
+  const name = userName ?? data?.name ?? "";
+  const initials =
+    userInitials ??
+    (name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]!.toUpperCase())
+      .join("") || "?");
+
   return (
     <div className="topbar">
       <button
@@ -148,8 +169,9 @@ export function TopBar({
         <Icon name="i-help" label="Help and docs" />
       </button>
       <AvatarMenu
-        userInitials={userInitials}
-        userName={userName}
+        userInitials={initials}
+        userName={name}
+        userPhoto={data?.photo_url ?? ""}
         planUsed={planUsed}
         planTotal={planTotal}
         planResetDays={planResetDays}
