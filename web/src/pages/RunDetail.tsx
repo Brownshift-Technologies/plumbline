@@ -295,7 +295,7 @@ export function RunDetail() {
             </span>
             <div style={{ flex: 1 }}>
               <div className="eyebrow">Blocked at a gate</div>
-              <h3>{finding?.title ?? "Waiting on a human approval"}</h3>
+              <h2>{finding?.title ?? "Waiting on a human approval"}</h2>
               {finding && (
                 <p style={{ marginTop: 9, fontSize: 14, color: "var(--ink2)", lineHeight: 1.6, maxWidth: "80ch" }}>
                   {gatedStep?.detail}

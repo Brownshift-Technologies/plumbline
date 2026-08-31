@@ -129,7 +129,7 @@ function TotpSection({ user }: { user: AsyncState<CurrentUser> }) {
   return (
     <div className="setrow">
       <div>
-        <h4>Two-factor authentication</h4>
+        <h3>Two-factor authentication</h3>
         <p>Required for anyone who can approve a patch.</p>
       </div>
       <div>
@@ -217,7 +217,7 @@ function SessionsSection() {
   return (
     <div className="setrow">
       <div>
-        <h4>Active sessions</h4>
+        <h3>Active sessions</h3>
         <p>Sign out anywhere you don't recognise.</p>
       </div>
       <div>
@@ -284,7 +284,7 @@ export function SecurityPane({ user, onSignOut }: { user: AsyncState<CurrentUser
     <div>
       <div className="setrow">
         <div>
-          <h4>Change password</h4>
+          <h3>Change password</h3>
           <p>You stay signed in here and are signed out everywhere else.</p>
         </div>
         <PasswordForm />
@@ -293,7 +293,7 @@ export function SecurityPane({ user, onSignOut }: { user: AsyncState<CurrentUser
       <SessionsSection />
       <div className="setrow">
         <div>
-          <h4>Sign out</h4>
+          <h3>Sign out</h3>
           <p>End this session on this device.</p>
         </div>
         <div>

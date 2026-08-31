@@ -74,7 +74,12 @@ export function Settings() {
         <EmptyState variant="error" title="Couldn't load your account" description={user.error} actions={<Button onClick={user.reload}>Retry</Button>} />
       )}
       {user.status === "success" && (
-        <div role="tabpanel">
+        <div role="tabpanel" aria-label={TAB_LABEL[tab]}>
+          {/* Names the active pane at h2, so the h4s inside each .setrow
+              (now h3) no longer jump straight from the page h1 -- axe's
+              heading-order. Visually hidden: the selected tab already
+              shows the same word, so rendering it twice would be noise. */}
+          <h2 className="visually-hidden">{TAB_LABEL[tab]}</h2>
           {tab === "profile" && <ProfilePane user={user} />}
           {tab === "security" && <SecurityPane user={user} onSignOut={onSignOut} />}
           {tab === "members" && <MembersPane user={user} />}

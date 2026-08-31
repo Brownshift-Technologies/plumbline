@@ -110,7 +110,7 @@ export function BillingPane({ user }: { user: AsyncState<CurrentUser> }) {
     <div>
       <div className="setrow">
         <div>
-          <h4>Plan</h4>
+          <h3>Plan</h3>
           <p>
             {data.plan}, billed {data.interval}. Renews {new Date(data.renews_at * 1000).toLocaleDateString()}.
           </p>
@@ -137,7 +137,7 @@ export function BillingPane({ user }: { user: AsyncState<CurrentUser> }) {
       </div>
       <div className="setrow">
         <div>
-          <h4>Usage this month</h4>
+          <h3>Usage this month</h3>
         </div>
         <div style={{ maxWidth: 370 }}>
           <Meter label="Runs" used={data.runs_used} limit={data.run_limit} />
@@ -146,7 +146,7 @@ export function BillingPane({ user }: { user: AsyncState<CurrentUser> }) {
       </div>
       <div className="setrow">
         <div>
-          <h4>Payment method</h4>
+          <h3>Payment method</h3>
           <p>Charged automatically on renewal.</p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
@@ -165,7 +165,7 @@ export function BillingPane({ user }: { user: AsyncState<CurrentUser> }) {
       </div>
       <div className="setrow">
         <div>
-          <h4>Invoice history</h4>
+          <h3>Invoice history</h3>
         </div>
         <div className="panel">
           <InvoiceHistory />

@@ -13,7 +13,7 @@ export function Panel({ title, headerExtra, children, className, style }: PanelP
     <div className={className ? `panel ${className}` : "panel"} style={style}>
       {(title || headerExtra) && (
         <header>
-          {title && <h3>{title}</h3>}
+          {title && <h2>{title}</h2>}
           <span className="sp" />
           {headerExtra}
         </header>

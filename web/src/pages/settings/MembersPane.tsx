@@ -101,7 +101,7 @@ export function MembersPane({ user }: { user: AsyncState<CurrentUser> }) {
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "20px 0 14px" }}>
         <div>
-          <h4 style={{ fontSize: 15, fontWeight: 600 }}>{rows.length} member{rows.length === 1 ? "" : "s"}</h4>
+          <h3 style={{ fontSize: 15, fontWeight: 600 }}>{rows.length} member{rows.length === 1 ? "" : "s"}</h3>
         </div>
         <span className="sp" />
         <InviteForm onInvited={members.reload} />

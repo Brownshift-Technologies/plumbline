@@ -83,7 +83,7 @@ export function WorkspacePane({ user }: { user: AsyncState<CurrentUser> }) {
     <div>
       <div className="setrow">
         <div>
-          <h4>Target URL</h4>
+          <h3>Target URL</h3>
           <p>
             The application the fleet tests. Every run crawls from here -- leave it unset and a run fails
             immediately, with a step explaining why, rather than reporting a clean pass on nothing.

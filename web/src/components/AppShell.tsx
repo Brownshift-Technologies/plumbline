@@ -28,7 +28,15 @@ export function AppShell() {
       <div className="main">
         <TopBar onOpenNav={() => setNavOpen(true)} navTriggerRef={navTriggerRef} />
         <DemoBanner />
-        <Outlet />
+        {/* The one <main> on the page. Without it axe reported
+            landmark-one-main on every screen, and `region` for every block
+            of page content -- all of it sat outside any landmark, so a
+            screen-reader user had no way to jump past the nav to the
+            actual page. `.content` only restores what the bare <Outlet />
+            inherited as a flex child of `.main`. */}
+        <main className="content" id="content">
+          <Outlet />
+        </main>
       </div>
     </div>
   );

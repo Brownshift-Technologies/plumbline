@@ -83,7 +83,7 @@ export function ProfilePane({ user }: { user: AsyncState<CurrentUser> }) {
     <div>
       <div className="setrow">
         <div>
-          <h4>Photo</h4>
+          <h3>Photo</h3>
           <p>Shown beside your approvals in the audit ledger.</p>
         </div>
         <div style={{ display: "flex", gap: 11, alignItems: "center" }}>
@@ -97,14 +97,14 @@ export function ProfilePane({ user }: { user: AsyncState<CurrentUser> }) {
       </div>
       <div className="setrow">
         <div>
-          <h4>Name</h4>
+          <h3>Name</h3>
           <p>How you appear to your team.</p>
         </div>
         <Field label="Name" value={name} onChange={(e) => setName(e.target.value)} wrapperStyle={{ margin: 0 }} />
       </div>
       <div className="setrow">
         <div>
-          <h4>Work email</h4>
+          <h3>Work email</h3>
           <p>Used to sign in and to send approval requests.</p>
         </div>
         <div>
@@ -119,7 +119,7 @@ export function ProfilePane({ user }: { user: AsyncState<CurrentUser> }) {
       </div>
       <div className="setrow">
         <div>
-          <h4>Role</h4>
+          <h3>Role</h3>
           <p>
             Only owners can change gate rules or approve a patch under <span className="mono">payments/*</span>.
           </p>
