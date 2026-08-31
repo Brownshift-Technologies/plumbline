@@ -114,6 +114,27 @@ export function SignIn() {
           <h3>Sign in to Plumbline</h3>
           <p className="sub">Welcome back.</p>
 
+          <div className="demo demo--first">
+            <b>
+              <Icon name="i-spark" size="s" /> Try the full product, free
+            </b>
+            <p>
+              A full workspace of your own, with real runs, a real failure and a real
+              proposed patch waiting at an approval gate. No account, no card, nothing
+              to install. It is still there when you come back.
+            </p>
+            {demoError && (
+              <p role="alert" style={{ color: "var(--fail)", fontSize: 13, marginTop: 8 }}>
+                {demoError}
+              </p>
+            )}
+            <Button variant="pri" onClick={onDemo} disabled={demoLoading}>
+              {demoLoading ? "Opening demo…" : "Open the live demo"}
+            </Button>
+          </div>
+
+          <div className="divider">or sign in</div>
+
           <div className="oauth">
             {OAUTH_PROVIDERS.map((p) => (
               <a key={p.id} href={oauthHref(p.id)} role="button">
@@ -204,23 +225,6 @@ export function SignIn() {
             </Button>
           </form>
 
-          <div className="demo">
-            <b>
-              <Icon name="i-spark" size="s" /> Try it without an account
-            </b>
-            <p>
-              A seeded workspace with real runs, a real failure and a real proposed
-              patch. Nothing to install, no card.
-            </p>
-            {demoError && (
-              <p role="alert" style={{ color: "var(--fail)", fontSize: 13, marginTop: 8 }}>
-                {demoError}
-              </p>
-            )}
-            <Button variant="pri" onClick={onDemo} disabled={demoLoading}>
-              {demoLoading ? "Opening demo…" : "Open the live demo"}
-            </Button>
-          </div>
 
           <p style={{ marginTop: 18, fontSize: 13.5, color: "var(--muted)", textAlign: "center" }}>
             New here?{" "}

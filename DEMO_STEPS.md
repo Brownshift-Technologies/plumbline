@@ -109,30 +109,34 @@ Close Slack, mail, and anything that shows notifications.
 
 ## B1. The opening, on the sign-in page
 
-Start with tab 1 showing **/signin**. Nothing to click through the first five
-paragraphs, ending at *"one gate that everything they do has to pass through."*
+Start with tab 1 showing **/signin**. Nothing to click for the first three
+paragraphs, ending at *"the ones that catch the expensive bugs."*
 
 **You should see:** the headline *The test suite you never had time to write*,
-the three sign-in buttons, the email form, and the **Open the live demo** panel.
+and at the top of the sign-in box the panel reading **Try the full product,
+free** with **Open the live demo** under it.
 
-**Why start here:** it is the page a judge lands on, and the whole opening is
-about a bug nobody wrote a test for. Talking over the sign-in screen keeps the
-first forty seconds on the problem instead of on a dashboard they cannot read
-yet.
+**Why start here:** it is the page a judge lands on, and the opening is about a
+bug nobody wrote a test for. Talking over the sign-in screen keeps the first
+forty seconds on the problem rather than on a dashboard nobody can read yet.
 
-## B1a. When you say *"Anyone can try it. No account, no card."*
+## B1a. When you say *"Anyone can try this. No account, no card."*
 
-Click **Open the live demo**.
+Gesture at the three provider buttons on the word "GitHub, Google or their own
+single sign-on", then click **Open the live demo**.
 
 **You should see:** Home, with the blue sandbox banner, and in the left rail
 `Runs 18`, `Findings 6`, `Behaviours 99+`, `Agents 11`.
 
-**Do NOT click the GitHub, Google or Okta buttons.** They are wired to the
-sign-in flow but no OAuth credentials are configured on this deployment, so
-they redirect with an empty `client_id` and land on a provider error page.
-Gesture at them while you say the sign-in line and move on. If you want them to
-be clickable on camera, register the OAuth apps first and set the client id and
-secret; otherwise say the line and click the demo button instead.
+**Do NOT click the GitHub, Google or Okta buttons.** No OAuth credentials are
+configured on this deployment, so they redirect with an empty `client_id` and
+land on a provider error page. Gesture and move on.
+
+**Why the click lands here:** everything after this sentence is narrated over
+the live product. The two paragraphs that follow, the workspace line and the
+"an agent that can write a test can write any file" pivot, are read with the
+dashboard already on screen, so the judge is looking at the thing while you
+explain why it needed a gate.
 
 ## B2. When you say *"Here is a run..."*
 

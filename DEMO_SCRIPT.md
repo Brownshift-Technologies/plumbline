@@ -16,24 +16,22 @@ instead of reusing the old one, the customer is charged twice.
 
 Nobody wrote a test for that, because it only happens when the provider is
 slow, and writing a test that makes a provider slow on purpose is tedious work
-that gets pushed to next sprint, every sprint.
+that gets pushed to next sprint, every sprint. That is the problem. It is not
+that teams do not test. It is that the tests nobody writes are the ones that
+catch the expensive bugs.
 
-That is the problem. It is not that teams do not test. It is that the tests
-nobody writes are the ones that catch the expensive bugs.
+Anyone can try this. No account, no card. Teams sign in with email, or with
+GitHub, Google or their own single sign-on, but you do not need any of that to
+look around.
 
-So point an AI at it. That is where the second problem starts.
+This is a real workspace of your own, and it is still here when you come back.
+Eleven agents, and one gate that everything they do has to pass through.
 
-An agent that can write a test can write any file. An agent that can open a
-pull request can merge one. Whether a model can find a bug stopped being the
+Because the second problem is the obvious fix. Point an AI at it, and now an
+agent that can write a test can write any file. An agent that can open a pull
+request can merge one. Whether a model can find a bug stopped being the
 interesting question a while ago. The question is what it is allowed to do the
 second it finds one.
-
-Plumbline is eleven agents that go looking for that bug, and one gate that
-everything they do has to pass through.
-
-Anyone can try it. No account, no card. This opens a real workspace with your
-own data in it, still there when you come back. Teams sign in with email, or
-with GitHub, Google or their own single sign-on.
 
 Here is that payments bug, found. Cartographer mapped forty-seven routes.
 Author turned plain English into a Playwright spec. Healer re-anchored four
