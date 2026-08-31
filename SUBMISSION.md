@@ -72,7 +72,9 @@ but because `pr.merge` is not in any agent's tool scope, and every tool call in 
 goes through one function that checks.
 
 The end result is that you type a sentence in English and get a spec that was written, run,
-root-caused, patched, and left at a gate with a human's name required on it. Every decision the Gateway
+root-caused, patched, and left at a gate with a human's name required on it. Or you never open
+the browser at all: Plumbline is an MCP server, so your own coding agent can start the run and
+read the finding, and it gets exactly the tools its API key's role allows. Every decision the Gateway
 made along the way is in a hash-chained ledger you can verify from a button in the UI.
 
 ## How we built it
@@ -101,11 +103,31 @@ to zero, and the worker is a Cloud Run Job with a full CPU and no request timeou
 execution per run. They only talk through Firestore and Pub/Sub. The worker never calls the
 API.
 
-FastAPI and Python 3.13 on the back, React 18 and Vite and TypeScript on the front with plain
-CSS tokens and no UI framework. Firestore, Pub/Sub, Cloud Run and Cloud Run Jobs, Vertex AI
-`gemini-3.5-flash`, Secret Manager, Artifact Registry, Cloud Build, Playwright driving real
-Chromium, OpenTelemetry throughout. Plumbline is an MCP server, and it consumes customer MCP
-servers through the same Gateway as everything else.
+**MCP runs in both directions, and the Gateway is why that is safe.** Plumbline is an MCP
+server: `POST /mcp` speaks JSON-RPC, `GET /mcp` streams over SSE, both authenticated with the
+same hashed API keys as the public `/v1/` surface. Eight tools, so your coding agent can start
+a run, read a finding, check coverage, write a behaviour in plain English, verify the ledger
+or approve a gated patch. `visible_tools(role)` filters the manifest by the calling key's
+role, so a reader's client never sees `plumbline_approve_patch` at all rather than seeing it
+and being refused on call.
+
+Our agents are also MCP clients, pointed at a customer's own servers. `McpToolSource` knows
+how to speak JSON-RPC and nothing else, deliberately: an agent makes an MCP call through
+`Gateway.call` exactly as it makes a `browser.read` call, so the call gets scope checking
+against `mcp.<server>`, a ledger entry, an OTel span and redaction on the way back. The
+Gateway redacts every `mcp.*` result unconditionally rather than trusting a `.read` suffix,
+because a customer's server names its own tools and a naming convention is not a guarantee.
+
+And a discovered tool is untrusted input. `discover()` runs every manifest entry's name and
+description through the same injection scanner the Gateway runs over a payload. A tool
+description is text a third party controls that ends up in an agent's prompt, which is the
+whole shape of an MCP tool-poisoning attack. Screening the manifest stops being optional the
+moment you let customers point agents at servers you did not write.
+
+**Stack.** FastAPI and Python 3.13 on the back, React 18 and Vite and TypeScript on the front
+with plain CSS tokens and no UI framework. Firestore, Pub/Sub, Cloud Run and Cloud Run Jobs,
+Vertex AI `gemini-3.5-flash`, Secret Manager, Artifact Registry, Cloud Build, Playwright
+driving real Chromium, OpenTelemetry throughout.
 
 Roughly 30k lines of Python and 8.4k of TypeScript, with 1,091 backend tests, 113 frontend
 tests and 18 Playwright end-to-end tests including accessibility audits, over 77 commits.
