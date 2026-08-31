@@ -106,6 +106,17 @@ class Workspace:
     # default that any workspace can be individually raised past is the
     # honest shape for what actually exists today.
     api_rate_limit_per_minute: int = 60
+    # Task 14f: the customer-run MCP servers THIS workspace has declared,
+    # e.g. `({"name": "seed", "url": "https://seed.acme.internal/mcp"},)`.
+    # `agents/mcp_client.py`'s `McpToolSource` is built from exactly this
+    # tuple -- an agent may only ever discover/call a server that appears
+    # here, and even then only one its own `gateway.policy.SCOPES` entry
+    # names (see that module's `_scope_key`). A plain tuple of dicts,
+    # matching `gate_rules`' own shape just above, rather than a typed
+    # dataclass: this is tenant-declared configuration with no fixed
+    # Plumbline-side schema to validate beyond "has a name and a url",
+    # the same trade `gate_rules` already makes for the identical reason.
+    mcp_servers: tuple[dict, ...] = ()
 
 
 @dataclass(frozen=True)

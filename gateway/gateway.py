@@ -172,7 +172,19 @@ class Gateway:
             # it handles a type it does not recognise (passes it through,
             # never raises) and a cyclic structure (marks the re-entered
             # container "[CIRCULAR]" rather than hanging).
-            if tool.endswith(".read"):
+            # Task 14f: an `mcp.<server>.<tool>` result is redacted
+            # UNCONDITIONALLY, not only when the tool name happens to end
+            # in `.read` -- a customer's own MCP server can name a tool
+            # anything at all (`get_user`, `reset_database`, ...), and
+            # nothing about "this came from a third-party server, not our
+            # own code" is contingent on a naming convention we do not
+            # control. Treating every MCP result as read-shaped for
+            # redaction purposes is the safe default: structural PII
+            # scrubbing on a result that turns out to be a plain `{"ok":
+            # true}` costs nothing, and skipping it on one that turns out
+            # to embed a customer's row of PII is the actual defect this
+            # branch exists to prevent.
+            if tool.endswith(".read") or tool.startswith("mcp."):
                 result = redact_deep(result)
 
             self._record(workspace_id, agent, tool, target, "allowed", decision.reason, policy_version)

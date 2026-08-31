@@ -92,7 +92,18 @@ SCOPES: dict[str, frozenset[str]] = {
     "cartographer": frozenset({"browser.read", "graph.write"}),
     "author":       frozenset({"graph.read", "repo.write:specs"}),
     "healer":       frozenset({"repo.write:specs", "trace.read"}),
-    "chaos":        frozenset({"net.fault", "env.write"}),
+    # "mcp.seed" (Task 14f): the ONE customer-run MCP server class Chaos
+    # may reach -- a database-seeding server, so a fault-injection run can
+    # reset state between attempts. See the module docstring's new "MCP
+    # tools are scoped by SERVER, not by individual tool" section: this is
+    # a scope-KEY, `mcp.<server-name>`, checked against `mcp.<server>.
+    # <tool>` calls via `_scope_key` in `decide()` below, never the literal
+    # per-tool string (a customer's server can add or rename its own tools
+    # without this table ever needing an edit). No other agent gets any
+    # `mcp.*` scope entry at all -- see Economist's own note below for why
+    # "gains nothing" is the deliberate default, not an oversight, for
+    # every agent this table does not explicitly grant one to.
+    "chaos":        frozenset({"net.fault", "env.write", "mcp.seed"}),
     "runner":       frozenset({"browser.drive", "artefact.write"}),
     # "repo.write:findings" added for Task 12b -- the original set here had
     # no write tool at all for an agent whose entire job is persisting a
@@ -189,6 +200,31 @@ def _normalise(target: str) -> str:
     return posixpath.normpath(target.replace("\\", "/"))
 
 
+def _scope_key(tool: str) -> str:
+    """The string `decide()` checks membership of `SCOPES` against.
+
+    For an MCP tool (`mcp.<server>.<tool-name>`, Task 14f -- see
+    `agents/mcp_client.py`), that is `mcp.<server>`, NOT the full literal
+    string: a customer's own MCP server is free to expose any number of
+    tools under any names, and SCOPES is code an engineer edits on
+    purpose (see the module docstring) -- forcing an edit here every time
+    a customer's server adds or renames a tool would be exactly the
+    "workspace setting widens scope" failure this module exists to
+    prevent, just moved one layer down. Scoping by SERVER is what "an
+    agent may call a server only if that server is in its own scope
+    entry" (Task 14f's own brief, verbatim) means concretely: SCOPES names
+    servers an agent may reach, never individual remote tools. Any other
+    tool string (no `mcp.` prefix, or fewer than three dot-separated
+    segments -- a malformed mcp tool name with nothing to scope by) is
+    returned unchanged, so this is a no-op for every one of Plumbline's
+    own built-in tools.
+    """
+    parts = tool.split(".")
+    if len(parts) >= 3 and parts[0] == "mcp":
+        return ".".join(parts[:2])
+    return tool
+
+
 def decide(
     agent: str,
     tool: str,
@@ -198,7 +234,7 @@ def decide(
     scope = SCOPES.get(agent)
     if scope is None:
         return Decision(False, f"unknown agent {agent!r}")
-    if tool not in scope:
+    if _scope_key(tool) not in scope:
         return Decision(False, f"{tool!r} is not in scope for {agent!r}")
 
     # `rules=None` ("use the defaults") and `rules=[]` ("this workspace
