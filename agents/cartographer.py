@@ -81,6 +81,7 @@ shape entirely, not just a slower one.
 """
 
 import uuid
+from urllib.parse import urljoin, urlsplit
 
 from agents.base import AgentResult
 from agents.browser import BrowserGotoError
@@ -105,7 +106,56 @@ _NON_ROUTE_SCHEMES = ("javascript:", "mailto:", "tel:", "data:")
 _STRIP_CHARS = ("\t", "\r", "\n", "​")
 
 
-def _internal_href(href: str) -> str | None:
+def _normalise_href(href: str) -> str:
+    """The one normalisation step both `_internal_href` and (Tier 2)
+    `validate_target_url` build on: strip every character in
+    `_STRIP_CHARS` from anywhere in the string, then fold every backslash
+    to a forward slash. Pulled out of `_internal_href` unchanged (fix
+    round 2's own logic, verbatim) so `validate_target_url` reuses this
+    exact normalisation instead of writing a second one -- see that
+    function's own docstring for why a target URL needs the identical
+    browser-parser-order treatment a discovered href does."""
+    normalised = href
+    for ch in _STRIP_CHARS:
+        normalised = normalised.replace(ch, "")
+    return normalised.replace("\\", "/")
+
+
+def _origin_of(url: str) -> str:
+    """`"scheme://host[:port]"` for an already-valid absolute `url` -- no
+    trailing slash, no path, lower-cased for case-insensitive comparison
+    (scheme and host are case-insensitive per RFC 3986; a path is not,
+    which is exactly why this helper never touches one). The one shared
+    definition of "origin" `Cartographer.run` and `_internal_href` both
+    compare against, so the two can never quietly disagree about what
+    counts as "the same site"."""
+    parsed = urlsplit(url)
+    return f"{parsed.scheme}://{parsed.netloc}".lower()
+
+
+def _path_of(url: str, origin: str) -> str:
+    """The origin-relative path (+ query, never a fragment) `url` names,
+    for comparing a browser's REPORTED landing url (`snapshot()["url"]`,
+    always absolute for a real `PlaywrightDriver`) back against the
+    relative path this crawl queued it under. `url` that is already
+    relative (no scheme/netloc -- `FakeBrowser`'s own convention for a
+    seeded redirect target, e.g. `test_a_route_that_redirects_...`'s
+    `"url": "/catalog"`) is returned unchanged: there is nothing to strip.
+    An absolute `url` whose own origin does not match `origin` is ALSO
+    returned unchanged (not rejected here -- point 1 in the module
+    docstring only ever asks "did this redirect somewhere new", and an
+    off-origin redirect target is exactly that; `_internal_href` is what
+    later refuses to ever QUEUE it)."""
+    parsed = urlsplit(url)
+    if not parsed.scheme or not parsed.netloc:
+        return url
+    if f"{parsed.scheme}://{parsed.netloc}".lower() != origin:
+        return url
+    path = parsed.path or "/"
+    return path + (f"?{parsed.query}" if parsed.query else "")
+
+
+def _internal_href(href: str, origin: str | None = None) -> str | None:
     """The normalised, same-origin path `href` names, or `None` if it is
     not a route this crawl should ever queue.
 
@@ -139,13 +189,27 @@ def _internal_href(href: str) -> str | None:
     an encoded `//` as if it were a literal one would reject hrefs that
     are genuinely internal (a path segment that happens to contain an
     encoded slash is not a host boundary at all).
+
+    Tier 2 (2026-08-30 contract, item 5): `origin`, when the caller knows
+    one (Cartographer.run does, once `Workspace.target_url` is set), is
+    what lets a FULLY-QUALIFIED same-origin href (`"https://acme.com/
+    dashboard"` written out in full on acme.com's own page) resolve as
+    internal -- something round 1 and round 2 both correctly rejected
+    outright, because neither ever had an origin to resolve a bare path
+    against and "doesn't start with /" was the only test available. This
+    is strictly an EXTENSION of the existing rules, never a replacement:
+    every check above still runs first, unchanged, against the same
+    normalised string; `origin` only ever gets consulted for an href that
+    survives all of them but still doesn't start with `/` -- and even
+    then, `urljoin` resolves it and the RESULT's own origin is compared,
+    never the raw string, so a backslash- or tab-hidden off-origin href
+    (folded to `//evil.com` above) never reaches this branch at all: it
+    was already rejected by the `//` check three paragraphs up, origin or
+    no origin.
     """
     if not href:
         return None
-    normalised = href
-    for ch in _STRIP_CHARS:
-        normalised = normalised.replace(ch, "")
-    normalised = normalised.replace("\\", "/")
+    normalised = _normalise_href(href)
 
     if normalised.startswith("//"):
         return None
@@ -153,13 +217,87 @@ def _internal_href(href: str) -> str | None:
     if any(lowered.startswith(scheme) for scheme in _NON_ROUTE_SCHEMES):
         return None
     stripped = normalised.split("#", 1)[0]  # point 3: a fragment is never a new page
-    return stripped if stripped.startswith("/") else None
+    if stripped.startswith("/"):
+        return stripped
+    if origin is None:
+        return None
+    resolved = urljoin(origin + "/", stripped)
+    if _origin_of(resolved) != origin:
+        return None
+    parsed = urlsplit(resolved)
+    return (parsed.path or "/") + (f"?{parsed.query}" if parsed.query else "")
+
+
+def validate_target_url(url: str) -> str:
+    """`""` when `url` is a usable `Workspace.target_url`; otherwise a
+    plain-English reason a customer sees inline on the settings form
+    (Tier 2 contract, item 3: "a malformed target discovered at run time
+    costs a whole run; discovered at save time it costs a form error").
+
+    Reuses `_normalise_href` -- the exact strip-then-fold-backslashes
+    treatment `_internal_href` applies to a discovered link -- rather
+    than writing a second normalisation, per the contract's own
+    instruction. A target URL is not a relative href, so the checks past
+    normalisation are necessarily different: `_internal_href` decides
+    same-origin-or-not for a path found ON a page; this decides whether
+    the string itself is even a valid ORIGIN to crawl in the first place
+    -- `http`/`https` only (rejects `javascript:`, `file:`, `data:`, and
+    everything else Cartographer already refuses to treat as a route,
+    plus every scheme neither of those two ever needed an opinion on),
+    and a real host (`http://` alone, or `http:///path`, parses with an
+    empty `hostname` -- a scheme with nothing to resolve against is not
+    an origin). `urlsplit` -- not a bespoke parser -- is what decides
+    "off-origin": a normalised string that parses to a DIFFERENT origin
+    than a naive read of the input suggests (a userinfo trick like
+    `"http://trusted.example@evil.com/"`, whose real host is `evil.com`,
+    not `trusted.example`) is caught by reading `.hostname`, never the
+    raw netloc, the same discipline `_origin_of` uses everywhere else in
+    this module.
+    """
+    normalised = _normalise_href((url or "").strip())
+    if not normalised:
+        return "set a target URL before running the fleet"
+    if normalised.startswith("//"):
+        return "must include an http:// or https:// scheme"
+    parsed = urlsplit(normalised)
+    if parsed.scheme not in ("http", "https"):
+        return "must start with http:// or https://"
+    if not parsed.hostname:
+        return "must include a host, e.g. https://app.example.com"
+    return ""
 
 
 class Cartographer:
     name = "cartographer"
 
     def run(self, ctx) -> AgentResult:
+        # Tier 2 (2026-08-30 contract, item 2): a workspace that exists but
+        # has never had `target_url` set is the exact failure shape this
+        # build has fought all the way through -- crawl nothing from "/",
+        # a bare path with no origin, and report a green run. Checked
+        # BEFORE the gateway is ever called (there is nothing to audit --
+        # no read happened) and BEFORE a single browser call, so a
+        # misconfigured workspace costs one cheap repo read, not a
+        # started-then-abandoned crawl. `workspace is None` (no row seeded
+        # at all) is deliberately NOT this case -- that is every agent
+        # unit test in this file, none of which seeds a `Workspace`
+        # (`tests/agent_fixtures.py`'s own documented convention: a
+        # missing workspace means "use the defaults", not "misconfigured")
+        # -- so only an ACTUAL workspace with a genuinely empty
+        # `target_url` trips this.
+        workspace = ctx.repo.workspace(ctx.workspace_id)
+        if workspace is not None and not workspace.target_url:
+            return AgentResult(
+                summary="Cartographer needs a target URL",
+                detail=(
+                    "Workspace.target_url is not set, so there is nothing to crawl. "
+                    "Set it in Settings → Workspace before running the fleet."
+                ),
+                outcome="error",
+                data={"routes": [], "new": 0, "unreachable": []},
+            )
+        origin = _origin_of(workspace.target_url) if workspace is not None and workspace.target_url else None
+
         known = {r.path for r in ctx.repo.routes_for_workspace(ctx.workspace_id)}
 
         def crawl():
@@ -175,8 +313,19 @@ class Cartographer:
                     continue
                 seen.add(path)
 
+                # Tier 2, item 5: once an origin is known, every
+                # navigation happens in ABSOLUTE terms -- `urljoin`
+                # against the workspace's own origin, never a bare
+                # relative path handed straight to the driver (a real
+                # `PlaywrightDriver.goto` has no base URL configured and
+                # would simply fail to resolve one). `queue`/`seen`/
+                # `routes` themselves stay relative-path-shaped
+                # throughout -- unchanged from before this task, and
+                # exactly what `Route.path` already stores -- only the
+                # string actually handed to `ctx.browser.goto` changes.
+                target = urljoin(origin + "/", path.lstrip("/")) if origin else path
                 try:
-                    ctx.browser.goto(path)
+                    ctx.browser.goto(target)
                 except BrowserGotoError:
                     # A login wall or a broken link costs this one route,
                     # not the rest of the crawl still queued behind it --
@@ -185,7 +334,8 @@ class Cartographer:
                     continue
 
                 snapshot = ctx.browser.snapshot()
-                canonical = snapshot.get("url", path) or path
+                landed = snapshot.get("url", target) or target
+                canonical = _path_of(landed, origin) if origin else landed
                 if canonical != path:
                     # `path` redirected elsewhere -- see point 1. Not a
                     # route of its own; queue the real target instead,
@@ -200,7 +350,7 @@ class Cartographer:
                     for e in ctx.browser.a11y()
                 )
                 for href in ctx.browser.links():
-                    href = _internal_href(href)
+                    href = _internal_href(href, origin)
                     if href and href not in seen and href not in queue:
                         queue.append(href)
 

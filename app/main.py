@@ -52,6 +52,7 @@ from app.surface_routes import router as surface_router
 from app.settings import PlumblineConfig, load_settings
 from app.webhooks import dispatch_run_finished
 from app.webhooks import router as webhooks_router
+from app.workspace_routes import router as workspace_router
 from core.events import enqueue_job
 from core.telemetry import log_event
 from core.web import create_app
@@ -354,6 +355,7 @@ def build_app(config: PlumblineConfig | None = None, repo: Repo | None = None) -
     app.include_router(public_router)
     app.include_router(mcp_router)
     app.include_router(github_router)
+    app.include_router(workspace_router)
     register_docs(app)
 
     @app.get("/_health")

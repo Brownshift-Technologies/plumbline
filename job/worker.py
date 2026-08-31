@@ -61,6 +61,54 @@ from gateway.ledger import Ledger
 from job.orchestrator import Orchestrator
 
 
+def _resolve_navigation_target(env: str | None) -> str:
+    """Tier 2 (2026-08-30 contract, item 4): the URL `_browser_factory`
+    should point a fresh driver at before the fleet starts, or `""` when
+    there is nothing to navigate to yet.
+
+    `""` is not this function's failure to report -- Cartographer's own
+    explicit `Workspace.target_url` check (`agents/cartographer.py`) is
+    what turns a genuinely unset target into the run's loud, explanatory
+    failure step; a driver that never got navigated anywhere simply stays
+    on `about:blank` until Cartographer's first real `goto` call, exactly
+    as before this task, for every run that DOES have a `target_url` (the
+    ones this function's `""` branch used to mean "we don't have this
+    wiring yet" now means "Cartographer already knows and will say so").
+
+    Reads `PLUMBLINE_RUN_ID` from the environment again, and builds its
+    own short-lived `Repo`, rather than threading `run`/`workspace`
+    through `job/worker.py`'s `browser_factory=` argument -- unlike
+    `_checkout_factory` above (which Orchestrator calls with `workspace`
+    directly, a Tier 2 addition to ITS OWN call site), `browser_factory`'s
+    shape is the fixed Tier 2 contract's own: a bare
+    `(env: str | None = None) -> Driver` callable Agent B's Playwright
+    work and the Oracle path (`job/orchestrator.py`'s `_oracle_step`) both
+    already build against. Resolving lazily, at CALL time, keeps that
+    signature untouched rather than widening it out from under two other
+    files being edited concurrently against the same contract.
+
+    `env`, when Oracle names one (`workspace.environments[0]`/`[1]`), is
+    accepted but does not change the URL returned: `Workspace` records
+    ordered environment NAMES only (see that field's own docstring in
+    `app/models.py`), never a URL per name -- there is exactly one URL on
+    a workspace today, `target_url`, so every named environment resolves
+    to it. This is the one place a future per-environment URL map would
+    plug in; falling back to `target_url` is not a special case today,
+    it is the only value there is.
+    """
+    run_id = os.environ.get("PLUMBLINE_RUN_ID", "").strip()
+    if not run_id:
+        return ""
+    repo = Repo(load_settings())
+    run = repo.run(run_id)
+    if run is None:
+        return ""
+    workspace = repo.workspace(run.workspace_id)
+    if workspace is None:
+        return ""
+    return workspace.target_url
+
+
 def _browser_factory(env: str | None = None):
     """The real driver, one per call -- `job/orchestrator.py` calls this
     once for the run's primary `ctx.browser` (`env=None`) and, only when
@@ -70,19 +118,69 @@ def _browser_factory(env: str | None = None):
     (`ThreadPoolExecutor`), and a single Playwright page is not something
     this codebase's own driver claims is safe to share across threads (see
     `agents/browser.py`'s own module docstring on how far
-    `PlaywrightDriver` is actually exercised today). `env` is accepted and
-    currently unused beyond that -- pointing a driver at a NAMED
-    environment's own base URL (rather than the workspace's single default
-    target) is real, live-deployment wiring this task does not have enough
-    of a contract for yet (no field anywhere records what URL "staging"
-    or "production" actually resolves to for a given workspace); flagged
-    here rather than guessed at.
+    `PlaywrightDriver` is actually exercised today).
+
+    Tier 2, item 4: navigates the fresh driver to `target_url` (or the
+    named `env`'s resolved URL -- see `_resolve_navigation_target`)
+    BEFORE handing it back, so `agents/cartographer.py`'s crawl -- and
+    every other agent driving `ctx.browser` after it -- lands on the
+    workspace's own site from the very first call, not `about:blank`.
     """
     from agents.browser import PlaywrightDriver
 
     driver = PlaywrightDriver()
     driver.start()
+    target = _resolve_navigation_target(env)
+    if target:
+        driver.goto(target)
     return driver
+
+
+def _checkout_factory(workspace):
+    """Tier 2: one real `job.checkout.RepoCheckout` per run, or `None`.
+
+    `None` for a demo sandbox (`is_demo`, seeded by `seed/demo.py` -- "a
+    demo run stays simulated" is this task's own non-negotiable) and for
+    any workspace that has not connected a GitHub repo yet
+    (`installation_id`/`repo_full_name` both start empty until
+    `app/github_routes.py`'s install/connect flow runs). `Orchestrator`
+    passes whatever this returns straight onto `ctx.checkout`, so `None`
+    here is exactly what makes Author/Healer/Surgeon skip with an
+    explanatory step rather than crash reaching for a repo that was never
+    connected.
+
+    Builds its own `GitHubApp` from the same two env vars
+    `app/main.py`'s FastAPI process reads (`GITHUB_APP_ID`,
+    `GITHUB_APP_PRIVATE_KEY`) -- this Job process never imports or shares
+    that FastAPI app's `state`, so it mints its own App identity the same
+    way, not a second implementation of one (see `app/github.py`'s own
+    module docstring on why there is exactly one client class for this).
+    """
+    if workspace is None or workspace.is_demo:
+        return None
+    if not workspace.installation_id or not workspace.repo_full_name:
+        return None
+
+    from app.github import GitHubApp
+    from job.checkout import RepoCheckout
+
+    github_app = GitHubApp(
+        os.environ.get("GITHUB_APP_ID", ""),
+        os.environ.get("GITHUB_APP_PRIVATE_KEY", "").encode(),
+    )
+    github_app.bind(workspace.repo_full_name, workspace.installation_id)
+    token = github_app.installation_token(workspace.installation_id)
+    default_branch = workspace.default_branch or "main"
+
+    checkout = RepoCheckout.clone(workspace.repo_full_name, token, ref=default_branch)
+    # Set after `clone()` returns, deliberately -- `clone()`'s own
+    # signature is the Tier 2 contract's fixed one, unchanged; these are
+    # the extra attributes `agents/surgeon.py` reads to open a real pull
+    # request (see `job/checkout.py`'s own module docstring).
+    checkout.github = github_app
+    checkout.repo_full_name = workspace.repo_full_name
+    checkout.default_branch = default_branch
+    return checkout
 
 
 def main() -> None:
@@ -99,6 +197,7 @@ def main() -> None:
         repo=repo, gateway=gateway,
         model_factory=lambda: GeminiModel(config),
         browser_factory=_browser_factory,
+        checkout_factory=_checkout_factory,
     )
 
     try:

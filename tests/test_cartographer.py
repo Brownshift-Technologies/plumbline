@@ -148,10 +148,14 @@ def test_a_login_walled_route_is_skipped_not_fatal():
 def test_a_policy_denial_is_not_swallowed_as_an_unreachable_page():
     # Distinct from a 401 on the target SITE: this is Plumbline's own
     # policy refusing the call outright, and must surface loudly rather
-    # than being folded into "just another broken link".
+    # than being folded into "just another broken link". `target_url` is
+    # set here on purpose -- this test is about the GATE, not about the
+    # Tier 2 "no target_url configured" precondition (see the tests below
+    # that exercise that one on its own), so the workspace it seeds must
+    # be a usable one that only fails because of `gate_rules`.
     ctx = make_ctx(pages={"/": {"links": []}})
     ctx.repo.put_workspace(Workspace(
-        id="ws1", name="Acme", repo="acme/storefront",
+        id="ws1", name="Acme", repo="acme/storefront", target_url="https://acme.example.com",
         gate_rules=({"tool": "browser.read", "pattern": "*", "effect": "deny"},)))
     with pytest.raises(GatewayError):
         Cartographer().run(ctx)
@@ -270,3 +274,80 @@ def test_a_crawl_does_not_follow_a_tab_hidden_off_origin_link():
                            "/cart": {"links": []}})
     out = Cartographer().run(ctx)
     assert out.data["routes"] == ["/", "/cart"]
+
+
+# --- Tier 2 (2026-08-30 contract, items 2 and 5): target_url ------------
+
+_ORIGIN = "https://acme.example.com"
+
+
+def _ws_with_target_url(target_url: str = _ORIGIN) -> Workspace:
+    return Workspace(id="ws1", name="Acme", repo="acme/storefront", target_url=target_url)
+
+
+def test_a_workspace_with_no_target_url_fails_loudly_instead_of_crawling():
+    # A REAL `Workspace` row (unlike every fixture above, which never puts
+    # one at all -- see tests/agent_fixtures.py's own documented "missing
+    # means use the defaults" convention) whose `target_url` was simply
+    # never set. This must never behave like the empty-crawl case above:
+    # no gateway call, no browser call, and a loud, explanatory outcome.
+    ctx = make_ctx(pages={"/": {"links": []}})
+    ctx.repo.put_workspace(Workspace(id="ws1", name="Acme", repo="acme/storefront"))
+    out = Cartographer().run(ctx)
+    assert out.outcome == "error"
+    assert out.data["routes"] == []
+    assert "target_url" in out.detail
+    assert ctx.browser.visited == [], "never navigated anywhere -- see the module docstring's item 2"
+
+
+def test_cartographer_resolves_relative_links_against_the_target_origin():
+    # Once `target_url` is set, EVERY navigation happens against its
+    # origin, in absolute terms -- `ctx.browser.visited` proves the real
+    # string handed to `goto`, not just that the right routes came back.
+    ctx = make_ctx(pages={
+        _ORIGIN + "/": {"links": ["/cart"]},
+        _ORIGIN + "/cart": {"links": []},
+    })
+    ctx.repo.put_workspace(_ws_with_target_url())
+    out = Cartographer().run(ctx)
+    assert out.data["routes"] == ["/", "/cart"]
+    assert ctx.browser.visited == [_ORIGIN + "/", _ORIGIN + "/cart"]
+
+
+def test_a_same_origin_fully_qualified_href_resolves_as_internal():
+    # Round 1/round 2 both rejected this outright (neither ever had an
+    # origin to resolve a bare path against) -- with one now known, a
+    # fully-qualified same-origin href is exactly as internal as its bare
+    # relative form.
+    assert _internal_href(_ORIGIN + "/dashboard", _ORIGIN) == "/dashboard"
+
+
+def test_cartographer_still_refuses_an_off_origin_link_after_resolution():
+    ctx = make_ctx(pages={
+        _ORIGIN + "/": {"links": ["https://evil.com/x", "/cart"]},
+        _ORIGIN + "/cart": {"links": []},
+    })
+    ctx.repo.put_workspace(_ws_with_target_url())
+    out = Cartographer().run(ctx)
+    assert out.data["routes"] == ["/", "/cart"]
+    assert not any("evil.com" in v for v in ctx.browser.visited)
+
+
+def test_the_backslash_and_tab_bypasses_still_fail_after_resolution():
+    # Fix round 2's own bypass strings, re-run with `origin` now known --
+    # exactly the case the task's own instructions call out: a
+    # normalisation change is precisely where a closed hole reopens.
+    assert _internal_href("/\\evil.com", _ORIGIN) is None
+    assert _internal_href("/\t/evil.com", _ORIGIN) is None
+    assert _internal_href("/\r/evil.com", _ORIGIN) is None
+    assert _internal_href("/​/evil.com", _ORIGIN) is None  # zero-width space
+    assert _internal_href("//evil-cdn.example.com/x", _ORIGIN) is None
+
+
+def test_a_crawl_with_an_origin_still_refuses_the_backslash_bypass():
+    ctx = make_ctx(pages={_ORIGIN + "/": {"links": ["/\\evil.com", "/cart"]},
+                           _ORIGIN + "/cart": {"links": []}})
+    ctx.repo.put_workspace(_ws_with_target_url())
+    out = Cartographer().run(ctx)
+    assert out.data["routes"] == ["/", "/cart"]
+    assert not any("evil.com" in v for v in ctx.browser.visited)

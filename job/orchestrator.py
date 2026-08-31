@@ -224,12 +224,22 @@ class _HaltRun(Exception):
 
 class Orchestrator:
     def __init__(self, repo, gateway, model_factory, browser_factory,
-                 chaos_target_env: str = DEFAULT_CHAOS_TARGET_ENV):
+                 chaos_target_env: str = DEFAULT_CHAOS_TARGET_ENV,
+                 checkout_factory=None):
         self._repo = repo
         self._gateway = gateway
         self._model_factory = model_factory
         self._browser_factory = browser_factory
         self._chaos_target_env = chaos_target_env
+        # Tier 2 (2026-08-30, Agent C's own contract item): builds one
+        # `job.checkout.RepoCheckout` for the run's `workspace`, or `None`
+        # -- a demo sandbox, or a workspace with no repo connected yet, see
+        # `job/worker.py`'s own `_checkout_factory`. `None` by default so
+        # every existing caller of this constructor (every test that
+        # predates this task) keeps building a context with
+        # `checkout=None`, exactly the "no repo connected" case Author,
+        # Healer, and Surgeon all already have to handle explicitly.
+        self._checkout_factory = checkout_factory
         # A per-`Step` hook, called immediately after each Step is written
         # to `repo` -- `None` by default (every real caller). Tests use it
         # to observe write ORDER directly (see
@@ -276,7 +286,15 @@ class Orchestrator:
             return self._repo.run(run_id)
         run = claimed  # state == "running"; runs_used already incremented
 
-        ctx = self._build_context(run)
+        # Tier 2: built once, before the sequence runs, and torn down no
+        # matter how the run ends -- "the checkout is disk in a Cloud Run
+        # Job; remove it when the run ends, including on failure" (this
+        # task's own non-negotiable). `_checkout_factory` itself already
+        # returns `None` for a demo sandbox or an unconnected repo, so
+        # `checkout` here is `None` exactly when Author/Healer/Surgeon are
+        # each expected to skip with an explanatory step.
+        checkout = self._checkout_factory(workspace) if self._checkout_factory else None
+        ctx = self._build_context(run, checkout)
         try:
             self._execute_sequence(ctx, run)
         except _HaltRun as halt:
@@ -287,15 +305,19 @@ class Orchestrator:
             # those is already caught inside `_step`) still must not leave
             # the run stuck in "running" forever.
             return self._finish(run, "failed")
+        finally:
+            if checkout is not None:
+                checkout.cleanup()
         return self._finish(run, "finished")
 
     # -- context ------------------------------------------------------
 
-    def _build_context(self, run: Run) -> AgentContext:
+    def _build_context(self, run: Run, checkout=None) -> AgentContext:
         return AgentContext(
             workspace_id=run.workspace_id, run_id=run.id,
             gateway=self._gateway, model=self._model_factory(),
             browser=self._browser_factory(), repo=self._repo,
+            checkout=checkout,
         )
 
     # -- the sequence itself --------------------------------------------
@@ -316,11 +338,24 @@ class Orchestrator:
         cartographer_result = self._step(Cartographer(), ctx, run)
         if cartographer_result is not None and not cartographer_result.data.get("routes"):
             # Nothing to map means nothing downstream has anything to do
-            # against -- stop here, successfully, rather than running ten
-            # more agents against an empty graph. Cartographer's own
-            # `detail` already says why (new routes vs. unreachable ones --
-            # see agents/cartographer.py), so this module adds nothing of
-            # its own to it.
+            # against -- stop here rather than running ten more agents
+            # against an empty graph. Cartographer's own `detail` already
+            # says why (new routes vs. unreachable ones, or -- Tier 2
+            # (2026-08-30 contract, item 2) -- a workspace with no
+            # `target_url` configured at all; see agents/cartographer.py),
+            # so this module adds nothing of its own to it. The TWO ways a
+            # crawl can come back empty are not the same outcome, though:
+            # an unreachable/empty SITE is Cartographer genuinely doing its
+            # job and finding nothing (outcome="ok", the run finishes
+            # cleanly); a MISCONFIGURED workspace is Cartographer refusing
+            # to even try (outcome="error", set only by that explicit
+            # target_url check) -- collapsing the two into the same
+            # "finished" halt is exactly the "crawled nothing and reported
+            # a green run" failure shape the contract calls out by name, so
+            # only the genuine-empty-crawl case still finishes; the
+            # misconfigured one fails the run outright.
+            if cartographer_result.outcome == "error":
+                raise _HaltRun("failed")
             raise _HaltRun("finished")
 
         self._step(Auditor(), ctx, run)

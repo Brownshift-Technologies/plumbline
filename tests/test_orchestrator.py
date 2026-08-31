@@ -36,6 +36,8 @@ Two testing strategies live side by side here, deliberately:
   responses just to reach one orchestrator-level edge case.
 """
 
+import pathlib
+import tempfile
 import time
 
 import pytest
@@ -48,6 +50,7 @@ from app.settings import PlumblineConfig
 from core.fakes import FakeFirestore, FakeModel
 from gateway.gateway import Gateway, GatewayError
 from gateway.ledger import Ledger
+from job.checkout import RepoCheckout
 from job.orchestrator import Orchestrator
 
 _CONFIG = PlumblineConfig(
@@ -59,6 +62,18 @@ _CONFIG = PlumblineConfig(
 # first try: contains "test(", "await", no test.only/test.skip, and the
 # route ("/") itself (via the goto call).
 _VALID_SPEC = "test('home', async () => {\n  await page.goto('/');\n});"
+
+# Tier 2 (2026-08-30 contract, item 1): every fixture below that seeds a
+# real `Workspace` for the REAL Cartographer to crawl now needs a
+# `target_url`, or Cartographer refuses to crawl at all (see
+# `agents/cartographer.py`'s own `run()`) -- exactly the behaviour this
+# task adds. Once `target_url` is set, Cartographer navigates in ABSOLUTE
+# terms (`agents/cartographer.py`'s module docstring, Tier 2 item 5), so
+# every `FakeBrowser` `pages={...}` dict built against a workspace that
+# carries this constant is keyed by the ABSOLUTE url (`_TARGET_URL + "/"`
+# for `"/"`, etc.), not the bare relative path fixtures used before this
+# task.
+_TARGET_URL = "https://acme.example.com"
 
 
 class _StubAgent:
@@ -90,7 +105,7 @@ def repo():
 
 @pytest.fixture
 def run(repo):
-    repo.put_workspace(Workspace(id="ws1", name="Acme", repo="acme/site"))
+    repo.put_workspace(Workspace(id="ws1", name="Acme", repo="acme/site", target_url=_TARGET_URL))
     r = Run(id="r1", workspace_id="ws1", number=1, trigger="manual")
     repo.put_run(r)
     return r
@@ -102,6 +117,23 @@ def _bare_orch(repo, *, pages=None, spec_results=None, model_responses=()):
         repo=repo, gateway=gateway,
         model_factory=lambda: FakeModel(list(model_responses)),
         browser_factory=lambda env=None: FakeBrowser(pages or {}, spec_results or {}),
+        # Tier 2 (2026-08-30, Agent C's own contract item): every fixture
+        # below builds a `Workspace` with no `installation_id`/
+        # `repo_full_name` set, which is exactly the "no repo connected"
+        # shape `job/worker.py`'s real `_checkout_factory` returns `None`
+        # for -- but these tests need Author/Healer/Surgeon to actually
+        # RUN against the real fleet (see the `orch` fixture's own
+        # docstring), not skip, so this test double always builds one
+        # regardless of what `workspace` looks like. `tests/test_checkout.py`
+        # owns proving `RepoCheckout.clone()` and its git plumbing work;
+        # this is a plain, disk-backed one (no git at all -- nothing here
+        # ever reaches Surgeon's real push/PR path, see the `orch`
+        # fixture's own comment on why its Surgeon call never gets that
+        # far).
+        checkout_factory=lambda workspace: RepoCheckout(
+            pathlib.Path(tempfile.mkdtemp(prefix="plumbline-orch-test-")),
+            repo_full_name="acme/site", default_branch="main",
+        ),
     )
 
 
@@ -109,7 +141,7 @@ def orch_first_step_for_a_fresh_run(repo, run_id):
     """Execute `run_id` against a 404'd single page (so Cartographer halts
     the run right after Sentinel, keeping this cheap and deterministic) and
     return the first `Step` written -- always Sentinel's."""
-    orch = _bare_orch(repo, pages={"/": {"error": "404"}})
+    orch = _bare_orch(repo, pages={_TARGET_URL + "/": {"error": "404"}})
     orch.execute(run_id)
     return orch._repo.steps_for_run(run_id)[0]
 
@@ -169,7 +201,7 @@ def orch(repo):
     run -- `FakeModel` asserts on any unscripted fourth call, so this
     fixture is itself a regression guard on that count.
     """
-    pages = {"/": {"a11y": [{"role": "button", "name": "Buy"}], "links": []}}
+    pages = {_TARGET_URL + "/": {"a11y": [{"role": "button", "name": "Buy"}], "links": []}}
     spec_results = {"specs/home.spec.ts": {"passed": False, "matcher": True, "error": "expected 42, got 41"}}
     model_responses = [
         _VALID_SPEC,
@@ -227,17 +259,17 @@ def test_chaos_can_see_this_workspaces_own_history_because_the_orchestrator_call
     # spent_queued -- was never actually exercised by this test at all).
     # A second run's Chaos step is then proven to read back whatever REAL
     # number that produced, not a canned one.
-    repo.put_workspace(Workspace(id="ws1", name="Acme", repo="acme/site"))
+    repo.put_workspace(Workspace(id="ws1", name="Acme", repo="acme/site", target_url=_TARGET_URL))
     prior = Run(id="r0", workspace_id="ws1", number=1, trigger="manual")
     repo.put_run(prior)
-    orch0 = _bare_orch(repo, pages={"/": {"error": "404"}})  # empty app -> fast, deterministic finish
+    orch0 = _bare_orch(repo, pages={_TARGET_URL + "/": {"error": "404"}})  # empty app -> fast, deterministic finish
     orch0.execute(prior.id)
     prior_duration = orch0._repo.run(prior.id).duration_ms
     assert prior_duration >= 0  # whatever it genuinely took, not a canned value
 
     run = Run(id="r1", workspace_id="ws1", number=2, trigger="manual")
     repo.put_run(run)
-    orch = _bare_orch(repo, pages={"/": {"links": []}}, model_responses=[_VALID_SPEC])
+    orch = _bare_orch(repo, pages={_TARGET_URL + "/": {"links": []}}, model_responses=[_VALID_SPEC])
     orch.execute(run.id)
     chaos_step = next(s for s in orch._repo.steps_for_run(run.id) if s.agent == "chaos")
     if prior_duration > 0:
@@ -270,12 +302,12 @@ def test_duration_excludes_time_spent_queued(repo):
     # inside a function body at call time, the way `Repo.claim_run`'s own
     # restamp does. An explicit, real "an hour ago" timestamp is simpler,
     # deterministic, and sidesteps that distinction entirely.
-    repo.put_workspace(Workspace(id="ws1", name="Acme", repo="acme/site"))
+    repo.put_workspace(Workspace(id="ws1", name="Acme", repo="acme/site", target_url=_TARGET_URL))
     an_hour_ago = time.time() - 3600.0
     queued_run = Run(id="r1", workspace_id="ws1", number=1, trigger="manual", started_at=an_hour_ago)
     repo.put_run(queued_run)
 
-    orch = _bare_orch(repo, pages={"/": {"error": "404"}})  # empty app -> fast, deterministic finish
+    orch = _bare_orch(repo, pages={_TARGET_URL + "/": {"error": "404"}})  # empty app -> fast, deterministic finish
     result = orch.execute("r1")
 
     assert result.state == "finished"
@@ -384,7 +416,7 @@ def test_no_routes_stops_early_and_says_why(repo, run):
     # first (unconditionally, fix round 1), so this is 2 steps now, not 1
     # -- the short circuit is about Cartographer finding nothing, not
     # about nothing having run before it.
-    orch = _bare_orch(repo, pages={"/": {"error": "404 not found"}})
+    orch = _bare_orch(repo, pages={_TARGET_URL + "/": {"error": "404 not found"}})
     orch.execute(run.id)
     assert orch._repo.run(run.id).state == "finished"
     steps = orch._repo.steps_for_run(run.id)
@@ -395,7 +427,7 @@ def test_no_routes_stops_early_and_says_why(repo, run):
 def test_a_clean_run_skips_triager_and_surgeon(repo, run):
     # The real fleet again, but the one spec PASSES outright -- Runner
     # reports zero failures, so there is nothing for Triager to reproduce.
-    pages = {"/": {"a11y": [{"role": "button", "name": "Buy"}], "links": []}}
+    pages = {_TARGET_URL + "/": {"a11y": [{"role": "button", "name": "Buy"}], "links": []}}
     spec_results = {"specs/home.spec.ts": {"passed": True}}
     orch = _bare_orch(repo, pages=pages, spec_results=spec_results, model_responses=[_VALID_SPEC])
     orch.execute(run.id)
@@ -411,7 +443,7 @@ def test_a_clean_run_skips_triager_and_surgeon(repo, run):
 def test_sentinel_runs_first_when_an_incident_is_open(repo, run):
     repo.put_incident(Incident(id="inc1", workspace_id="ws1", source="sentry",
                                 message="checkout crashed", url="/checkout", status="open"))
-    orch = _bare_orch(repo, pages={"/": {"error": "404"}})
+    orch = _bare_orch(repo, pages={_TARGET_URL + "/": {"error": "404"}})
     orch.execute(run.id)
     agents = [s.agent for s in orch._repo.steps_for_run(run.id)]
     assert agents[0] == "sentinel"
@@ -421,7 +453,7 @@ def test_sentinel_runs_and_writes_a_step_even_with_no_open_incidents(repo, run):
     # Fix round 1: Sentinel's own precondition gate is gone. "No incidents"
     # is no longer indistinguishable from "the precondition check never
     # ran Sentinel at all" -- there is no longer a precondition check.
-    orch = _bare_orch(repo, pages={"/": {"error": "404"}})
+    orch = _bare_orch(repo, pages={_TARGET_URL + "/": {"error": "404"}})
     orch.execute(run.id)
     steps = orch._repo.steps_for_run(run.id)
     assert steps[0].agent == "sentinel"
@@ -456,8 +488,8 @@ def test_the_step_list_distinguishes_no_incidents_from_sentinel_never_running(re
 
 def test_oracle_runs_when_a_second_environment_is_configured(repo, run):
     repo.put_workspace(Workspace(id="ws1", name="Acme", repo="acme/site",
-                                  environments=("production", "staging")))
-    orch = _bare_orch(repo, pages={"/": {"links": []}}, model_responses=[_VALID_SPEC])
+                                  environments=("production", "staging"), target_url=_TARGET_URL))
+    orch = _bare_orch(repo, pages={_TARGET_URL + "/": {"links": []}}, model_responses=[_VALID_SPEC])
     orch.execute(run.id)
     steps = {s.agent: s for s in orch._repo.steps_for_run(run.id)}
     assert steps["oracle"].outcome != "skipped"
@@ -494,3 +526,78 @@ def test_a_run_whose_workspace_was_deleted_mid_flight_fails_cleanly(repo):
     orch = _bare_orch(repo)
     result = orch.execute("r1")
     assert result.state == "failed"
+
+
+# --- Tier 2 (2026-08-30 contract, item 2): no target_url configured -------
+
+
+def _unconfigured_run(repo):
+    # Deliberately NOT the `run` fixture -- that one carries `_TARGET_URL`.
+    # A genuinely present `Workspace` row with its `target_url` left at
+    # the field's own default (`""`) is exactly the state a real,
+    # never-configured workspace is in.
+    repo.put_workspace(Workspace(id="ws1", name="Acme", repo="acme/site"))
+    r = Run(id="r_unconfigured", workspace_id="ws1", number=1, trigger="manual")
+    repo.put_run(r)
+    return r
+
+
+def test_a_run_without_a_target_url_fails_with_an_explanatory_step(repo):
+    run = _unconfigured_run(repo)
+    orch = _bare_orch(repo)  # no pages seeded at all -- nothing should ever be crawled
+    orch.execute(run.id)
+
+    steps = orch._repo.steps_for_run(run.id)
+    cartographer_step = next(s for s in steps if s.agent == "cartographer")
+    assert cartographer_step.outcome == "error"
+    assert "target_url" in cartographer_step.detail
+    assert "Settings" in cartographer_step.detail
+    # Nothing downstream of Cartographer ever ran -- there was nothing to
+    # map, so there is nothing for Auditor/Author/Runner/... to do against.
+    assert [s.agent for s in steps] == ["sentinel", "cartographer"]
+
+
+def test_a_run_without_a_target_url_is_never_reported_green(repo):
+    run = _unconfigured_run(repo)
+    orch = _bare_orch(repo)
+    result = orch.execute(run.id)
+    # The exact failure shape the contract calls out by name: a run that
+    # crawled nothing must never be reported "finished" (this codebase's
+    # green) -- it must fail loudly.
+    assert result.state == "failed"
+
+
+# --- Tier 2 (2026-08-30): the checkout's own lifetime ----------------------
+
+
+def test_the_checkout_is_removed_even_when_the_run_fails(repo, run):
+    # "the checkout is disk in a Cloud Run Job; remove it when the run
+    # ends, including on failure" -- this task's own non-negotiable.
+    # `_StubAgent("cartographer", raises=...)` is the same shape
+    # `test_one_agent_failing_does_not_lose_the_earlier_steps` above uses
+    # to force `execute()` down its "failed" path deterministically.
+    built = {}
+
+    def checkout_factory(workspace):
+        checkout = RepoCheckout(
+            pathlib.Path(tempfile.mkdtemp(prefix="plumbline-orch-cleanup-test-")),
+            repo_full_name="acme/site", default_branch="main",
+        )
+        built["checkout"] = checkout
+        return checkout
+
+    gateway = Gateway(repo, Ledger(repo))
+    orch = Orchestrator(
+        repo=repo, gateway=gateway,
+        model_factory=lambda: FakeModel([]),
+        browser_factory=lambda env=None: FakeBrowser({}, {}),
+        checkout_factory=checkout_factory,
+    )
+    orch = _stub_sequence(orch, [_StubAgent("sentinel", raises=RuntimeError("boom"))])
+
+    result = orch.execute(run.id)
+
+    assert result.state == "failed"
+    assert "checkout" in built, "the factory must have actually been called"
+    assert not built["checkout"].path.exists(), \
+        "the checkout must be removed from disk even though the run failed"

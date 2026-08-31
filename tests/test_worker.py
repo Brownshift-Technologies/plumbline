@@ -14,7 +14,7 @@ test. `job.worker.Orchestrator` is replaced with a tiny stand-in whose
 import pytest
 
 import job.worker as worker
-from app.models import Run
+from app.models import Run, Workspace
 from app.settings import PlumblineConfig
 
 
@@ -136,3 +136,91 @@ def test_main_builds_the_orchestrator_with_a_model_and_browser_factory(monkeypat
 
     assert callable(fake.kwargs["model_factory"])
     assert callable(fake.kwargs["browser_factory"])
+
+
+# --- Tier 2 (2026-08-30 contract, item 4): _browser_factory navigation ----
+
+
+class _RecordingDriver:
+    """Stands in for `agents.browser.PlaywrightDriver` -- records `start`/
+    `goto` calls without ever touching a real Chromium, the same trade
+    `tests/test_agent_base.py`'s own recording doubles make for `start`'s
+    `chromium_sandbox=False` kwarg."""
+
+    def __init__(self):
+        self.calls: list[tuple] = []
+
+    def start(self, playwright_factory=None):
+        self.calls.append(("start",))
+
+    def goto(self, url: str) -> None:
+        self.calls.append(("goto", url))
+
+
+def _fake_repo_for(workspace: Workspace):
+    class _FakeRepo:
+        def __init__(self, config):
+            pass
+
+        def run(self, run_id):
+            return Run(id=run_id, workspace_id=workspace.id, number=1, trigger="manual")
+
+        def workspace(self, workspace_id):
+            return workspace if workspace_id == workspace.id else None
+
+    return _FakeRepo
+
+
+def test_browser_factory_navigates_to_the_workspaces_target_url(monkeypatch):
+    monkeypatch.setenv("PLUMBLINE_RUN_ID", "r1")
+    ws = Workspace(id="ws1", name="Acme", repo="acme/site", target_url="https://acme.example.com")
+    monkeypatch.setattr(worker, "Repo", _fake_repo_for(ws))
+    driver = _RecordingDriver()
+    monkeypatch.setattr("agents.browser.PlaywrightDriver", lambda: driver)
+
+    result = worker._browser_factory()
+
+    assert result is driver
+    assert driver.calls == [("start",), ("goto", "https://acme.example.com")]
+
+
+def test_browser_factory_does_not_navigate_when_target_url_is_unset(monkeypatch):
+    monkeypatch.setenv("PLUMBLINE_RUN_ID", "r1")
+    ws = Workspace(id="ws1", name="Acme", repo="acme/site")  # target_url left at its default, ""
+    monkeypatch.setattr(worker, "Repo", _fake_repo_for(ws))
+    driver = _RecordingDriver()
+    monkeypatch.setattr("agents.browser.PlaywrightDriver", lambda: driver)
+
+    worker._browser_factory()
+
+    assert driver.calls == [("start",)], "no target configured -- Cartographer's own check is what fails loudly"
+
+
+def test_browser_factory_falls_back_to_target_url_for_a_named_environment(monkeypatch):
+    # `env`, when Oracle names one, is accepted -- there is no per-
+    # environment URL on `Workspace` yet, only names, so it resolves to
+    # the same `target_url` every other environment does today.
+    monkeypatch.setenv("PLUMBLINE_RUN_ID", "r1")
+    ws = Workspace(id="ws1", name="Acme", repo="acme/site", environments=("production", "staging"),
+                    target_url="https://acme.example.com")
+    monkeypatch.setattr(worker, "Repo", _fake_repo_for(ws))
+    driver = _RecordingDriver()
+    monkeypatch.setattr("agents.browser.PlaywrightDriver", lambda: driver)
+
+    worker._browser_factory("staging")
+
+    assert driver.calls == [("start",), ("goto", "https://acme.example.com")]
+
+
+def test_browser_factory_with_no_run_id_never_navigates(monkeypatch):
+    # `_isolate` (autouse) already clears PLUMBLINE_RUN_ID -- this is the
+    # driver-construction path Orchestrator would never actually reach
+    # (main() fails fast before building one), exercised directly here so
+    # `_resolve_navigation_target`'s own early return is proven, not
+    # assumed.
+    driver = _RecordingDriver()
+    monkeypatch.setattr("agents.browser.PlaywrightDriver", lambda: driver)
+
+    worker._browser_factory()
+
+    assert driver.calls == [("start",)]

@@ -133,6 +133,22 @@ class Workspace:
     installation_id: str = ""
     repo_full_name: str = ""
     default_branch: str = "main"
+    # Tier 2 (2026-08-30 contract, item 1): the application under test --
+    # the ONE fact `job/worker.py`'s own module docstring flagged as
+    # missing everywhere else in this model: "no field anywhere records
+    # what URL 'staging' or 'production' actually resolves to for a given
+    # workspace." `""` means unconfigured. `agents/cartographer.py`'s
+    # `run()` refuses to crawl at all when this is empty -- it returns an
+    # explanatory `AgentResult(outcome="error", ...)` naming this exact
+    # field rather than starting a breadth-first walk from a bare `"/"`
+    # with no origin, which is what silently "crawled nothing and
+    # reported a green run" before this field existed. Validated at
+    # WRITE time (`app/workspace_routes.py`'s `PUT /api/workspace`), not
+    # at run time -- a malformed URL costs a form error there, a whole
+    # run here, so nothing this codebase writes into this field is ever
+    # anything other than `""` or a URL that already passed
+    # `agents.cartographer.validate_target_url`.
+    target_url: str = ""
     # A per-session demo sandbox's own timestamp, read by `seed/demo.py`'s
     # cleanup sweep (`app/main.py`'s `_sweep_expired_demo_workspaces_
     # factory`) to find workspaces whose 2-hour `DEMO_TTL_SECONDS` window
