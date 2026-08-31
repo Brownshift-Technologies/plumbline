@@ -15,3 +15,15 @@ web/test-results/
 web/playwright-report/
 web/blob-report/
 .gstack/
+
+# Recording and submission working files. The judges read README.md,
+# ARCHITECTURE.md and BLOG.md; these are the notes I record and submit FROM,
+# and they are kept out of the repo rather than deleted -- they still exist
+# locally, they just are not part of what anyone is being asked to review.
+DEMO_SCRIPT.md
+DEMO_STEPS.md
+SOCIAL.md
+SUBMISSION.md
+deck/
+.shots/
+design/

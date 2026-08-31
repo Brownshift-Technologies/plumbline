@@ -31,8 +31,8 @@ outbound webhook. For that, connect a GitHub repo in **Settings** and Plumbline 
 writes real spec files, and opens a real pull request on a branch, never on your default
 branch, and never merged without a human.
 
-See `ARCHITECTURE.md` for the full design and the diagram (`plumbline-architecture.svg`),
-`DEMO_SCRIPT.md` for the video script, and `BLOG.md` for how it was built.
+See `ARCHITECTURE.md` for the full design and the diagram (`plumbline-architecture.svg`), and
+`BLOG.md` for how it was built, including the things that went wrong.
 
 ## Provenance
 

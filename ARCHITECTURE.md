@@ -115,8 +115,8 @@ depends on. Economist holds no write scope of any kind: it's the only agent in t
 can propose deleting something and cannot itself act on that proposal.
 
 `Surgeon.pr.merge` is in its scope because the tool exists; the *gate rule* on a workspace's
-`payments/*` path is what stops it from ever being exercised without a human. That's the
-demo's strongest beat, see `DEMO_SCRIPT.md`.
+`payments/*` path is what stops it from ever being exercised without a human. Scope says what
+an agent could ask for. The gate says who has to agree before it happens.
 
 ## MCP, in both directions
 
