@@ -1,0 +1,228 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 1040" font-family="Figtree, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title>Plumbline architecture</title>
+  <desc>Browser calls the Cloud Run API, which reads and writes Firestore and publishes to Pub/Sub. A Cloud Run Job worker consumes the run and spawns eleven agents. Every one of those agents' tool calls passes through a single Gateway, which checks scope, screens for injection, applies per-workspace gate rules, only then runs the call, and always redacts, appends to the ledger and emits a trace -- including when the call errors. Cleared calls reach Vertex AI or Playwright. A gated call, such as Surgeon opening a pull request under payments/*, stops at a human approval gate.</desc>
+
+  <defs>
+    <marker id="arrowInk" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#3C3C38"/>
+    </marker>
+    <marker id="arrowBrand" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1F4FD8"/>
+    </marker>
+    <marker id="arrowMuted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8B887F"/>
+    </marker>
+    <marker id="arrowWarn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#94600F"/>
+    </marker>
+  </defs>
+
+  <!-- frame -->
+  <rect x="1" y="1" width="1498" height="1038" rx="16" fill="#FDFCFA" stroke="#E7E5E0" stroke-width="1.5"/>
+
+  <!-- title -->
+  <text x="750" y="34" text-anchor="middle" font-size="25" font-weight="800" fill="#1A1A18" letter-spacing="-.01em">Plumbline — architecture</text>
+  <text x="750" y="56" text-anchor="middle" font-size="13" fill="#5F5F59">Browser → Cloud Run API → Firestore / Pub/Sub → Cloud Run Job worker → Gateway → eleven agents → Vertex AI + Playwright</text>
+
+  <!-- Browser -->
+  <rect x="640" y="82" width="220" height="52" rx="9" fill="#FFFFFF" stroke="#D8D5CE" stroke-width="1.4"/>
+  <text x="750" y="104" text-anchor="middle" font-size="15" font-weight="700" fill="#1A1A18">Browser</text>
+  <text x="750" y="120" text-anchor="middle" font-size="10.5" fill="#5F5F59">sign-in · dashboard · SSE client</text>
+
+  <line x1="750" y1="134" x2="750" y2="164" stroke="#3C3C38" stroke-width="1.6" marker-end="url(#arrowInk)"/>
+
+  <!-- API -->
+  <rect x="505" y="166" width="490" height="86" rx="10" fill="#FFFFFF" stroke="#D8D5CE" stroke-width="1.6"/>
+  <text x="750" y="194" text-anchor="middle" font-size="14.5" font-weight="700" fill="#1A1A18">Cloud Run — plumbline-api (FastAPI)</text>
+  <text x="750" y="212" text-anchor="middle" font-size="11" fill="#3C3C38">auth · workspaces · REST · SSE run stream</text>
+  <text x="750" y="228" text-anchor="middle" font-size="9.3" font-style="italic" fill="#6E6E66">GET /_health — not /healthz (Google's frontend intercepts that exact path)</text>
+  <text x="750" y="242" text-anchor="middle" font-size="9" fill="#8B887F">region: us-central1</text>
+
+  <line x1="702" y1="252" x2="635" y2="288" stroke="#3C3C38" stroke-width="1.5" marker-end="url(#arrowInk)"/>
+  <line x1="798" y1="252" x2="865" y2="288" stroke="#3C3C38" stroke-width="1.5" marker-end="url(#arrowInk)"/>
+
+  <!-- Firestore -->
+  <rect x="497" y="290" width="260" height="78" rx="9" fill="#FBFAF7" stroke="#D8D5CE" stroke-width="1.4"/>
+  <text x="627" y="318" text-anchor="middle" font-size="14" font-weight="700" fill="#1A1A18">Firestore</text>
+  <text x="627" y="336" text-anchor="middle" font-size="10.3" fill="#3C3C38">state · routes · findings · patches</text>
+  <text x="627" y="352" text-anchor="middle" font-size="9" font-family="'IBM Plex Mono', monospace" fill="#5F5F59">ledger_head/{workspace} — CAS write</text>
+
+  <!-- Pub/Sub -->
+  <rect x="743" y="290" width="260" height="78" rx="9" fill="#FBFAF7" stroke="#D8D5CE" stroke-width="1.4"/>
+  <text x="873" y="318" text-anchor="middle" font-size="14" font-weight="700" fill="#1A1A18">Pub/Sub</text>
+  <text x="873" y="336" text-anchor="middle" font-size="10.3" fill="#3C3C38">run.requested · run.step · run.finished</text>
+  <text x="873" y="352" text-anchor="middle" font-size="9" fill="#5F5F59">audit trail + future consumers</text>
+
+  <!-- SSE dashed poll back to API -->
+  <line x1="560" y1="290" x2="560" y2="255" stroke="#8B887F" stroke-width="1.4" stroke-dasharray="4 4" marker-end="url(#arrowMuted)"/>
+  <text x="430" y="266" text-anchor="end" font-size="9" font-style="italic" fill="#5F5F59">1s poll + replay on connect —</text>
+  <text x="430" y="278" text-anchor="end" font-size="9" font-style="italic" fill="#5F5F59">no Pub/Sub fan-out (a push lands on one instance)</text>
+
+  <!-- PubSub -> Worker -->
+  <line x1="873" y1="368" x2="758" y2="396" stroke="#3C3C38" stroke-width="1.5" marker-end="url(#arrowInk)"/>
+
+  <!-- Policy / Worker / Ledger row -->
+  <rect x="40" y="398" width="280" height="66" rx="9" fill="#F2F0FC" stroke="#5B3FBF" stroke-width="1.5"/>
+  <text x="180" y="422" text-anchor="middle" font-size="13.5" font-weight="700" fill="#1A1A18">Policy</text>
+  <text x="180" y="438" text-anchor="middle" font-size="9.3" font-family="'IBM Plex Mono', monospace" fill="#5F5F59">SCOPES — static per agent, in code</text>
+  <text x="180" y="452" text-anchor="middle" font-size="9.3" font-family="'IBM Plex Mono', monospace" fill="#5F5F59">gate rules — per-workspace, versioned</text>
+
+  <rect x="590" y="398" width="320" height="66" rx="9" fill="#FFFFFF" stroke="#D8D5CE" stroke-width="1.6"/>
+  <text x="750" y="420" text-anchor="middle" font-size="12.3" font-weight="700" fill="#1A1A18">Cloud Run Job — plumbline-worker</text>
+  <text x="750" y="436" text-anchor="middle" font-size="10" fill="#3C3C38">one execution per run · Orchestrator</text>
+  <text x="750" y="450" text-anchor="middle" font-size="9" font-family="'IBM Plex Mono', monospace" fill="#5F5F59">claim_run (CAS) stamps started_at</text>
+
+  <rect x="1180" y="398" width="280" height="66" rx="9" fill="#F2F0FC" stroke="#5B3FBF" stroke-width="1.5"/>
+  <text x="1320" y="422" text-anchor="middle" font-size="13.5" font-weight="700" fill="#1A1A18">Ledger</text>
+  <text x="1320" y="438" text-anchor="middle" font-size="9.3" font-family="'IBM Plex Mono', monospace" fill="#5F5F59">hash-chained: SHA-256(prior + payload)</text>
+  <text x="1320" y="452" text-anchor="middle" font-size="9.3" fill="#5F5F59">+ an OpenTelemetry span per call</text>
+
+  <line x1="300" y1="431" x2="466" y2="548" stroke="#1F4FD8" stroke-width="1.6" marker-end="url(#arrowBrand)"/>
+  <text x="358" y="475" text-anchor="middle" font-size="9" fill="#1F4FD8" transform="rotate(38 358 475)">decide()</text>
+  <line x1="750" y1="464" x2="750" y2="518" stroke="#1F4FD8" stroke-width="1.8" marker-end="url(#arrowBrand)"/>
+  <line x1="1034" y1="548" x2="1180" y2="431" stroke="#1F4FD8" stroke-width="1.6" marker-end="url(#arrowBrand)"/>
+  <text x="1122" y="475" text-anchor="middle" font-size="9" fill="#1F4FD8" transform="rotate(-38 1122 475)">append()</text>
+
+  <!-- GATEWAY -->
+  <rect x="470" y="520" width="560" height="190" rx="12" fill="#EEF2FE" stroke="#1F4FD8" stroke-width="3"/>
+  <text x="750" y="554" text-anchor="middle" font-size="23" font-weight="800" fill="#1F4FD8" letter-spacing=".02em">GATEWAY</text>
+  <text x="750" y="573" text-anchor="middle" font-size="11.3" font-style="italic" fill="#3C3C38">every tool call from every agent passes through this one function</text>
+  <line x1="500" y1="583" x2="1000" y2="583" stroke="#C9D4F7" stroke-width="1"/>
+  <text x="500" y="603" font-size="10.8" fill="#3C3C38">1 · scope check — deny by default (SCOPES; static, no tenant override)</text>
+  <text x="500" y="623" font-size="10.8" fill="#3C3C38">2 · check_input — screens the payload AND site-derived text for injection</text>
+  <text x="500" y="643" font-size="10.8" fill="#3C3C38">3 · decide() — per-workspace gate rules; fails closed on an empty target</text>
+  <text x="500" y="663" font-size="10.8" fill="#3C3C38">4 · fn() executes — only once steps 1–3 have cleared</text>
+  <text x="500" y="683" font-size="10.8" fill="#3C3C38">5 · redact_deep → ledger.append → OTel span — every outcome, incl. a raise</text>
+
+  <!-- fan convergence points -->
+  <circle cx="470" cy="615" r="4.5" fill="#1F4FD8"/>
+  <circle cx="1030" cy="615" r="4.5" fill="#1F4FD8"/>
+
+  <!-- Vertex / Playwright -->
+  <line x1="630" y1="710" x2="610" y2="758" stroke="#1F4FD8" stroke-width="1.6" marker-end="url(#arrowBrand)"/>
+  <line x1="870" y1="710" x2="890" y2="758" stroke="#1F4FD8" stroke-width="1.6" marker-end="url(#arrowBrand)"/>
+  <text x="750" y="740" text-anchor="middle" font-size="9" fill="#5F5F59">fn() — only once the gateway clears it</text>
+
+  <rect x="490" y="760" width="240" height="80" rx="9" fill="#FFFFFF" stroke="#D8D5CE" stroke-width="1.6"/>
+  <text x="610" y="788" text-anchor="middle" font-size="14" font-weight="700" fill="#1A1A18">Vertex AI</text>
+  <text x="610" y="806" text-anchor="middle" font-size="11" font-family="'IBM Plex Mono', monospace" fill="#3C3C38">gemini-3.5-flash</text>
+  <text x="610" y="822" text-anchor="middle" font-size="9" fill="#5F5F59">location: global (regional 404s)</text>
+
+  <rect x="770" y="760" width="240" height="80" rx="9" fill="#FFFFFF" stroke="#D8D5CE" stroke-width="1.6"/>
+  <text x="890" y="788" text-anchor="middle" font-size="14" font-weight="700" fill="#1A1A18">Playwright</text>
+  <text x="890" y="806" text-anchor="middle" font-size="11" fill="#3C3C38">Chromium</text>
+  <text x="890" y="822" text-anchor="middle" font-size="9" font-family="'IBM Plex Mono', monospace" fill="#5F5F59">chromiumSandbox: false</text>
+  <text x="890" y="834" text-anchor="middle" font-size="8" fill="#8B887F">(AppArmor here; same fix in Cloud Run)</text>
+
+  <!-- Human approval gate -->
+  <rect x="470" y="862" width="560" height="72" rx="10" fill="#FBF2E3" stroke="#94600F" stroke-width="1.8"/>
+  <text x="750" y="888" text-anchor="middle" font-size="14" font-weight="700" fill="#7A4E0C">Human approval gate</text>
+  <text x="750" y="906" text-anchor="middle" font-size="10.3" fill="#3C3C38">owner/approver + TOTP must sign before Surgeon's PR can merge</text>
+  <text x="750" y="922" text-anchor="middle" font-size="9.3" fill="#5F5F59">e.g. a gate rule requiring a human on payments/* before pr.merge</text>
+
+  <!-- LEFT column: the original seven -->
+  <text x="180" y="304" text-anchor="middle" font-size="10" font-weight="700" fill="#1F4FD8" letter-spacing=".05em">THE ORIGINAL SEVEN</text>
+
+  <!-- cartographer -->
+  <rect x="40" y="320" width="280" height="74" rx="8" fill="#FFFFFF" stroke="#1A1A18" stroke-opacity=".18" stroke-width="1.3"/>
+  <text x="180" y="342" text-anchor="middle" font-size="12.5" font-weight="700" fill="#1A1A18">Cartographer</text>
+  <text x="180" y="358" text-anchor="middle" font-size="9.7" fill="#3C3C38">crawls the app, maps the route graph</text>
+  <text x="180" y="374" text-anchor="middle" font-size="8.6" font-family="'IBM Plex Mono', monospace" fill="#5F5F59">browser.read · graph.write</text>
+
+  <!-- author -->
+  <rect x="40" y="406" width="280" height="74" rx="8" fill="#FFFFFF" stroke="#1A1A18" stroke-opacity=".18" stroke-width="1.3"/>
+  <text x="180" y="428" text-anchor="middle" font-size="12.5" font-weight="700" fill="#1A1A18">Author</text>
+  <text x="180" y="444" text-anchor="middle" font-size="9.7" fill="#3C3C38">plain English + graph gaps → Playwright</text>
+  <text x="180" y="460" text-anchor="middle" font-size="8.6" font-family="'IBM Plex Mono', monospace" fill="#5F5F59">graph.read · repo.write:specs</text>
+
+  <!-- healer -->
+  <rect x="40" y="492" width="280" height="74" rx="8" fill="#FFFFFF" stroke="#1A1A18" stroke-opacity=".18" stroke-width="1.3"/>
+  <text x="180" y="514" text-anchor="middle" font-size="12.5" font-weight="700" fill="#1A1A18">Healer</text>
+  <text x="180" y="530" text-anchor="middle" font-size="9.7" fill="#3C3C38">re-anchors selectors as the UI drifts</text>
+  <text x="180" y="546" text-anchor="middle" font-size="8.6" font-family="'IBM Plex Mono', monospace" fill="#5F5F59">repo.write:specs · trace.read</text>
+
+  <!-- chaos -->
+  <rect x="40" y="578" width="280" height="74" rx="8" fill="#FFFFFF" stroke="#1A1A18" stroke-opacity=".18" stroke-width="1.3"/>
+  <text x="180" y="600" text-anchor="middle" font-size="12.5" font-weight="700" fill="#1A1A18">Chaos</text>
+  <text x="180" y="616" text-anchor="middle" font-size="9.7" fill="#3C3C38">injects latency, faults, toxic input</text>
+  <text x="180" y="632" text-anchor="middle" font-size="8.6" font-family="'IBM Plex Mono', monospace" fill="#5F5F59">net.fault · env.write · mcp.seed</text>
+
+  <!-- runner -->
+  <rect x="40" y="664" width="280" height="74" rx="8" fill="#FFFFFF" stroke="#1A1A18" stroke-opacity=".18" stroke-width="1.3"/>
+  <text x="180" y="686" text-anchor="middle" font-size="12.5" font-weight="700" fill="#1A1A18">Runner</text>
+  <text x="180" y="702" text-anchor="middle" font-size="9.7" fill="#3C3C38">executes specs — no model, on purpose</text>
+  <text x="180" y="718" text-anchor="middle" font-size="8.6" font-family="'IBM Plex Mono', monospace" fill="#5F5F59">browser.drive · artefact.write</text>
+
+  <!-- triager -->
+  <rect x="40" y="750" width="280" height="74" rx="8" fill="#FFFFFF" stroke="#1A1A18" stroke-opacity=".18" stroke-width="1.3"/>
+  <text x="180" y="772" text-anchor="middle" font-size="12.5" font-weight="700" fill="#1A1A18">Triager</text>
+  <text x="180" y="788" text-anchor="middle" font-size="9.7" fill="#3C3C38">root cause; reproduces 5×; flake vs bug</text>
+  <text x="180" y="804" text-anchor="middle" font-size="8.6" font-family="'IBM Plex Mono', monospace" fill="#5F5F59">trace.read · repo.read · repo.write:findings</text>
+
+  <!-- surgeon -->
+  <rect x="40" y="836" width="280" height="74" rx="8" fill="#FFFFFF" stroke="#1A1A18" stroke-opacity=".18" stroke-width="1.3"/>
+  <text x="180" y="858" text-anchor="middle" font-size="12.5" font-weight="700" fill="#1A1A18">Surgeon</text>
+  <text x="180" y="874" text-anchor="middle" font-size="9.7" fill="#3C3C38">proposes the patch, opens the PR, stops</text>
+  <text x="180" y="890" text-anchor="middle" font-size="8.6" font-family="'IBM Plex Mono', monospace" fill="#5F5F59">repo.write:src · pr.open/merge · checks.write</text>
+
+  <!-- left fan lines -->
+  <line x1="320" y1="357" x2="470" y2="615" stroke="#1F4FD8" stroke-opacity=".4" stroke-width="1.2"/>
+  <line x1="320" y1="443" x2="470" y2="615" stroke="#1F4FD8" stroke-opacity=".4" stroke-width="1.2"/>
+  <line x1="320" y1="529" x2="470" y2="615" stroke="#1F4FD8" stroke-opacity=".4" stroke-width="1.2"/>
+  <line x1="320" y1="615" x2="470" y2="615" stroke="#1F4FD8" stroke-opacity=".4" stroke-width="1.2"/>
+  <line x1="320" y1="701" x2="470" y2="615" stroke="#1F4FD8" stroke-opacity=".4" stroke-width="1.2"/>
+  <line x1="320" y1="787" x2="470" y2="615" stroke="#1F4FD8" stroke-opacity=".4" stroke-width="1.2"/>
+  <line x1="320" y1="873" x2="470" y2="615" stroke="#1F4FD8" stroke-opacity=".4" stroke-width="1.2"/>
+
+  <!-- RIGHT column: +four -->
+  <text x="1320" y="433" text-anchor="middle" font-size="10" font-weight="700" fill="#5B3FBF" letter-spacing=".05em">+ FOUR, BUILD-EVERYTHING</text>
+
+  <!-- sentinel -->
+  <rect x="1180" y="449" width="280" height="74" rx="8" fill="#FFFFFF" stroke="#1A1A18" stroke-opacity=".18" stroke-width="1.3"/>
+  <text x="1320" y="471" text-anchor="middle" font-size="12.5" font-weight="700" fill="#1A1A18">Sentinel</text>
+  <text x="1320" y="487" text-anchor="middle" font-size="9.7" fill="#3C3C38">production incident → reproducing test</text>
+  <text x="1320" y="503" text-anchor="middle" font-size="8.6" font-family="'IBM Plex Mono', monospace" fill="#5F5F59">telemetry.read · graph.read · repo.write:specs</text>
+
+  <!-- auditor -->
+  <rect x="1180" y="535" width="280" height="74" rx="8" fill="#FFFFFF" stroke="#1A1A18" stroke-opacity=".18" stroke-width="1.3"/>
+  <text x="1320" y="557" text-anchor="middle" font-size="12.5" font-weight="700" fill="#1A1A18">Auditor</text>
+  <text x="1320" y="573" text-anchor="middle" font-size="9.7" fill="#3C3C38">accessibility + security findings</text>
+  <text x="1320" y="589" text-anchor="middle" font-size="8.6" font-family="'IBM Plex Mono', monospace" fill="#5F5F59">browser.read · graph.read</text>
+
+  <!-- oracle -->
+  <rect x="1180" y="621" width="280" height="74" rx="8" fill="#FFFFFF" stroke="#1A1A18" stroke-opacity=".18" stroke-width="1.3"/>
+  <text x="1320" y="643" text-anchor="middle" font-size="12.5" font-weight="700" fill="#1A1A18">Oracle</text>
+  <text x="1320" y="659" text-anchor="middle" font-size="9.7" fill="#3C3C38">differential across two environments</text>
+  <text x="1320" y="675" text-anchor="middle" font-size="8.6" font-family="'IBM Plex Mono', monospace" fill="#5F5F59">browser.read · graph.read (2 browsers)</text>
+
+  <!-- economist -->
+  <rect x="1180" y="707" width="280" height="74" rx="8" fill="#FFFFFF" stroke="#1A1A18" stroke-opacity=".18" stroke-width="1.3"/>
+  <text x="1320" y="729" text-anchor="middle" font-size="12.5" font-weight="700" fill="#1A1A18">Economist</text>
+  <text x="1320" y="745" text-anchor="middle" font-size="9.7" fill="#3C3C38">recommends removing tests, no write scope</text>
+  <text x="1320" y="761" text-anchor="middle" font-size="8.6" font-family="'IBM Plex Mono', monospace" fill="#5F5F59">graph.read · repo.read</text>
+
+  <!-- right fan lines -->
+  <line x1="1180" y1="486" x2="1030" y2="615" stroke="#1F4FD8" stroke-opacity=".4" stroke-width="1.2"/>
+  <line x1="1180" y1="572" x2="1030" y2="615" stroke="#1F4FD8" stroke-opacity=".4" stroke-width="1.2"/>
+  <line x1="1180" y1="658" x2="1030" y2="615" stroke="#1F4FD8" stroke-opacity=".4" stroke-width="1.2"/>
+  <line x1="1180" y1="744" x2="1030" y2="615" stroke="#1F4FD8" stroke-opacity=".4" stroke-width="1.2"/>
+
+  <!-- Surgeon -> Human gate -->
+  <line x1="320" y1="873" x2="468" y2="898" stroke="#94600F" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arrowWarn)"/>
+  <text x="392" y="864" text-anchor="middle" font-size="8.8" font-style="italic" fill="#7A4E0C" transform="rotate(9 392 864)">opens a PR, cannot merge it</text>
+
+  <!-- legend -->
+  <line x1="60" y1="963" x2="100" y2="963" stroke="#1F4FD8" stroke-width="1.8" marker-end="url(#arrowBrand)"/>
+  <text x="108" y="967" font-size="10" fill="#3C3C38">gateway.call(agent, tool, target, payload, fn)</text>
+
+  <line x1="60" y1="983" x2="100" y2="983" stroke="#8B887F" stroke-width="1.4" stroke-dasharray="4 4" marker-end="url(#arrowMuted)"/>
+  <text x="108" y="987" font-size="10" fill="#3C3C38">SSE poll (1s), not a Pub/Sub push</text>
+
+  <rect x="420" y="956" width="16" height="14" rx="3" fill="#F2F0FC" stroke="#5B3FBF" stroke-width="1.3"/>
+  <text x="444" y="967" font-size="10" fill="#3C3C38">governance (Policy, Ledger)</text>
+
+  <rect x="680" y="956" width="16" height="14" rx="3" fill="#FBF2E3" stroke="#94600F" stroke-width="1.3"/>
+  <text x="704" y="967" font-size="10" fill="#3C3C38">human approval required</text>
+
+  <text x="750" y="1006" text-anchor="middle" font-size="9.3" font-style="italic" fill="#8B887F">core/ (config · store · events · gemini · guards · telemetry · web) is Plumbline's own code, absorbed from an earlier internal library (agentic-substrate) rather than vendored — see README.md.</text>
+</svg>
