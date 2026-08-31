@@ -35,7 +35,7 @@ const SCREENS = [
   ["/settings", "Settings"],
 ] as const;
 
-const SETTINGS_TABS = ["Profile", "Security", "Members", "Workspace", "Billing"] as const;
+const SETTINGS_TABS = ["Profile", "Security", "Members", "Workspace", "MCP", "Billing"] as const;
 
 /**
  * Collect render failures.

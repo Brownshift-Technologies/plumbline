@@ -11,9 +11,10 @@ import { ProfilePane } from "./settings/ProfilePane";
 import { SecurityPane } from "./settings/SecurityPane";
 import { MembersPane } from "./settings/MembersPane";
 import { BillingPane } from "./settings/BillingPane";
+import { McpPane } from "./settings/McpPane";
 import { WorkspacePane } from "./settings/WorkspacePane";
 
-const TABS = ["profile", "security", "members", "workspace", "billing"] as const;
+const TABS = ["profile", "security", "members", "workspace", "mcp", "billing"] as const;
 type Tab = (typeof TABS)[number];
 
 const TAB_LABEL: Record<Tab, string> = {
@@ -21,6 +22,7 @@ const TAB_LABEL: Record<Tab, string> = {
   security: "Security",
   members: "Members",
   workspace: "Workspace",
+  mcp: "MCP",
   billing: "Billing",
 };
 
@@ -84,6 +86,7 @@ export function Settings() {
           {tab === "security" && <SecurityPane user={user} onSignOut={onSignOut} />}
           {tab === "members" && <MembersPane user={user} />}
           {tab === "workspace" && <WorkspacePane user={user} />}
+          {tab === "mcp" && <McpPane />}
           {tab === "billing" && <BillingPane user={user} />}
         </div>
       )}
