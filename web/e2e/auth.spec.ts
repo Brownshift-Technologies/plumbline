@@ -1,8 +1,9 @@
 import { test, expect } from "@playwright/test";
 import {
-  assertResponsiveNoHorizontalScroll,
+  assertNoHorizontalScroll,
   assertNoSeriousA11yViolations,
   openLiveDemo,
+  BREAKPOINTS,
 } from "./helpers";
 
 test.describe("the demo door", () => {
@@ -43,10 +44,39 @@ test.describe("the demo door", () => {
 });
 
 test.describe("responsive layout (Task 16 breakpoints)", () => {
-  test("Home never scrolls horizontally at 375/768/1024/1440", async ({ page }) => {
-    await openLiveDemo(page);
-    await assertResponsiveNoHorizontalScroll(page, "Home");
-  });
+  // One test per breakpoint, not one test looping over all four -- a loop
+  // that throws on the first bad breakpoint never tells you about the
+  // other three. See the 768px case below: this split is what surfaced it
+  // as a single, precisely-located failure instead of an early exit.
+  for (const bp of BREAKPOINTS) {
+    const run = async (page: import("@playwright/test").Page) => {
+      await openLiveDemo(page);
+      await page.setViewportSize({ width: bp.width, height: bp.height });
+      await assertNoHorizontalScroll(page, `Home @ ${bp.name}`);
+    };
+
+    if (bp.width === 768) {
+      // BUG (found by this suite): Home's quick-action grid (`.grid5` /
+      // `.grid3`, web/src/pages/Home.tsx + web/src/styles/base.css:113)
+      // only collapses to a single column inside the
+      // `@media (max-width: 759.98px)` block in
+      // web/src/styles/responsive.css. 768px sits in the very next band
+      // up, `@media (max-width: 1099.98px) and (min-width: 760px)` (the
+      // icon-rail band), which has no override for it -- so the grid stays
+      // at 5 fixed columns and the button "card" for e.g. Import overflows
+      // the viewport (measured: document.scrollWidth 851 vs clientWidth
+      // 768). 375, 1024 and 1440 are all clean; this is not a suite
+      // problem, it's a one-band gap in the CSS. Left as `test.fixme`, not
+      // deleted or loosened, per task-17f's brief -- flip to `test` once
+      // responsive.css's icon-rail band collapses `.grid5`/`.grid3` too.
+      test.fixme(
+        `Home never scrolls horizontally @ ${bp.name}`,
+        async ({ page }) => run(page),
+      );
+    } else {
+      test(`Home never scrolls horizontally @ ${bp.name}`, async ({ page }) => run(page));
+    }
+  }
 
   test("at 375px the nav is a slide-over with a working focus trap", async ({ page }) => {
     await openLiveDemo(page);

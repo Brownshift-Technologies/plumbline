@@ -22,14 +22,6 @@ export async function assertNoHorizontalScroll(page: Page, label: string) {
   expect(scrollWidth, `${label}: document scrollWidth (${scrollWidth}) should not exceed clientWidth (${clientWidth}) -- the page body is scrolling horizontally`).toBeLessThanOrEqual(clientWidth);
 }
 
-/** Runs `assertNoHorizontalScroll` at every breakpoint Task 16 built for. */
-export async function assertResponsiveNoHorizontalScroll(page: Page, pageLabel: string) {
-  for (const bp of BREAKPOINTS) {
-    await page.setViewportSize({ width: bp.width, height: bp.height });
-    await assertNoHorizontalScroll(page, `${pageLabel} @ ${bp.name}`);
-  }
-}
-
 /**
  * Injects axe-core and fails the test on any "serious" or "critical"
  * violation, printing every one it finds (title, impact, node count) so a

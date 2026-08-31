@@ -11,3 +11,6 @@ dist/
 uv.lock
 .superpowers/
 .harness/
+web/test-results/
+web/playwright-report/
+web/blob-report/
