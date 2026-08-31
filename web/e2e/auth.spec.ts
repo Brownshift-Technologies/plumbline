@@ -140,3 +140,40 @@ test.describe("accessibility", () => {
     await assertNoSeriousA11yViolations(page, "Home (demo)");
   });
 });
+
+test.describe("creating a real account", () => {
+  test("the sign-in page links to signup, and signup lands you in the product", async ({ page }) => {
+    // "Create an account" was `href="#"` -- a dead link. The demo door was
+    // the only way in, and a demo session's runs are SIMULATED
+    // (app/run_routes.py: `simulate_run(...) if sess.is_demo`), so nobody
+    // could reach the path where the fleet actually executes.
+    await page.goto("/signin");
+    await page.getByRole("link", { name: "Create an account" }).click();
+    await expect(page).toHaveURL(/\/signup$/);
+
+    const email = `e2e-signup-${Date.now()}@example.com`;
+    await page.getByLabel("Your name").fill("E2E Signup");
+    await page.getByLabel("Work email").fill(email);
+    await page.getByLabel("Password").fill("a-long-enough-passphrase");
+    await page.getByRole("button", { name: "Create account" }).click();
+
+    // Signup issues the session cookie itself -- straight into the app,
+    // not back to a sign-in form.
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+
+    // A real account, so no demo sandbox banner.
+    await expect(page.getByText("This is your own live sandbox")).toHaveCount(0);
+  });
+
+  test("a password the server would reject is caught before the request", async ({ page }) => {
+    await page.goto("/signup");
+    await page.getByLabel("Your name").fill("Too Short");
+    await page.getByLabel("Work email").fill("short@example.com");
+    await page.getByLabel("Password").fill("short");
+    await page.getByRole("button", { name: "Create account" }).click();
+
+    await expect(page.getByText("Use at least 12 characters.")).toBeVisible();
+    await expect(page).toHaveURL(/\/signup$/);
+  });
+});

@@ -1,5 +1,6 @@
 export const routes = {
   signin: "/signin",
+  signup: "/signup",
   home: "/",
   runs: "/runs",
   run: (id: string) => `/runs/${id}`,

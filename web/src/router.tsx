@@ -2,6 +2,7 @@ import { createBrowserRouter } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
 import { RequireSession } from "./components/RequireSession";
 import { SignIn } from "./pages/SignIn";
+import { SignUp } from "./pages/SignUp";
 import { Home } from "./pages/Home";
 import { Runs } from "./pages/Runs";
 import { RunDetail } from "./pages/RunDetail";
@@ -16,6 +17,7 @@ import { routes } from "./lib/routes";
 
 export const router = createBrowserRouter([
   { path: routes.signin, element: <SignIn /> },
+  { path: routes.signup, element: <SignUp /> },
   {
     // Session gate sits OUTSIDE the shell, so an unauthenticated visitor
     // never sees dashboard chrome or fires a screen's fetches at all.

@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Icon } from "../components/Icon";
 import { Field } from "../components/Field";
 import { Button } from "../components/Button";
@@ -223,7 +223,10 @@ export function SignIn() {
           </div>
 
           <p style={{ marginTop: 18, fontSize: 13.5, color: "var(--muted)", textAlign: "center" }}>
-            New here? <a href="#" className="lnk">Create an account</a>
+            New here?{" "}
+            <Link to={routes.signup} className="lnk">
+              Create an account
+            </Link>
           </p>
         </div>
       </div>
