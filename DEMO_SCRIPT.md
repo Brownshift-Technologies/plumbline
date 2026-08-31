@@ -66,13 +66,17 @@ Chaos injecting 240ms of latency on the payments API, Runner seeing two charges 
 one, Triager reproducing it five times out of five and ruling it a real bug, not a flake.
 Point at the ledger entry each step is writing as it happens.
 
-**2:50** Open the finding. Show the patch: Surgeon's diff, the pull request link, and the
-gate state — **awaiting approval**. Try to merge it as the reader-role demo account: the
-button is disabled, with the actual reason shown ("payments/* requires an owner's approval"),
-not just greyed out silently.
+**2:50** Open the finding — click the row on **Findings**, it goes straight to the run.
+Show the patch: Surgeon's diff, the pull request link, and the gate state — **awaiting
+approval**. Say the line that matters: the fleet wrote this patch, verified it, and then
+*stopped*. It cannot merge it. Nothing in the eleven agents' tool scopes contains
+`pr.merge`.
 
-**3:10** Switch to an owner account with TOTP. Approve. Show the pull request going from
-blocked to merged — a human, not an agent, made the call that mattered.
+**3:10** Approve it yourself, in the demo. The patch goes from blocked to merged and the
+ledger records who did it — a human, not an agent, made the call that mattered. (For the
+RBAC half: a real workspace's reader sees the same button disabled with the actual reason
+shown, "payments/* requires an owner's approval", not greyed out silently. `patch.spec.ts`
+asserts both roles.)
 
 **3:25** One more screen: the audit ledger, filtered to this run. "Every decision the Gateway
 made — allowed, blocked, gated — is right here, signed, in order, and nobody can quietly edit
