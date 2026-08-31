@@ -72,9 +72,11 @@ def test_goto_a_real_page_and_snapshot_it(driver):
     assert snap["url"].startswith("data:")
 
 
-def test_run_spec_raises_not_implemented(driver):
-    with pytest.raises(NotImplementedError):
-        driver.run_spec("specs/anything.spec.ts")
+# `run_spec` used to raise NotImplementedError, and a test here asserted
+# exactly that. Tier 2 implemented it, and this file never noticed: it is
+# opt-in, so the stale assertion sat green-by-absence until the suite was
+# actually run. Real coverage now lives in test_playwright_run_spec_live.py,
+# which drives four real fixture specs through real Chromium.
 
 
 # --- fix round 1 -----------------------------------------------------------
