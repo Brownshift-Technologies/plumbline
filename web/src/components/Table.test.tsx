@@ -26,3 +26,14 @@ test("a row without a click handler is not exposed as a button", () => {
   render(<Table columns={columns} rows={rows} getRowKey={(r) => r.id} />);
   expect(screen.queryByRole("button")).not.toBeInTheDocument();
 });
+
+test("skeletonRows renders shaped placeholder rows matching the real column count, not the real data", () => {
+  render(<Table columns={columns} rows={rows} getRowKey={(r) => r.id} skeletonRows={4} />);
+  const skeletonRows = document.querySelectorAll("tr[data-skeleton-row]");
+  expect(skeletonRows).toHaveLength(4);
+  // Each skeleton row has one shimmer block per real column.
+  expect(skeletonRows[0].querySelectorAll(".skel")).toHaveLength(columns.length);
+  // The real row's data never renders while skeletonRows is set.
+  expect(screen.queryByText("Ada")).not.toBeInTheDocument();
+  expect(screen.getByRole("table")).toHaveAttribute("aria-busy", "true");
+});

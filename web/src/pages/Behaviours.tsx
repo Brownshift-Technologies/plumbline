@@ -10,6 +10,7 @@ import { useToast } from "../components/Toast";
 import { api } from "../lib/api";
 import { useAsync } from "../lib/useAsync";
 import { useCurrentUser } from "../lib/useCurrentUser";
+import { isDemoWrite, demoWriteMessage } from "../lib/demo";
 import type { Behaviour } from "../lib/types";
 
 interface DraftBehaviour {
@@ -126,12 +127,14 @@ export function Behaviours() {
       tags: draft.tags.split(",").map((t) => t.trim()).filter(Boolean),
     };
     try {
-      if (draft.id) {
-        await api.patch(`/behaviours/${draft.id}`, body);
+      const res = draft.id
+        ? await api.patch(`/behaviours/${draft.id}`, body)
+        : await api.post("/behaviours", body);
+      if (isDemoWrite(res)) {
+        show(demoWriteMessage(draft.id ? "this behaviour would be updated" : "this behaviour would be created"));
       } else {
-        await api.post("/behaviours", body);
+        show(draft.id ? "Behaviour updated." : "Behaviour created.");
       }
-      show(draft.id ? "Behaviour updated." : "Behaviour created.");
       setFormOpen(false);
       list.reload();
     } catch (err) {
@@ -143,8 +146,8 @@ export function Behaviours() {
 
   async function onDelete(b: Behaviour) {
     try {
-      await api.del(`/behaviours/${b.id}`);
-      show("Behaviour deleted.");
+      const res = await api.del(`/behaviours/${b.id}`);
+      show(isDemoWrite(res) ? demoWriteMessage("this behaviour would be deleted") : "Behaviour deleted.");
       list.reload();
     } catch (err) {
       show(err instanceof Error ? err.message : "Couldn't delete this behaviour.");
@@ -172,9 +175,15 @@ export function Behaviours() {
             onClick={() => onDelete(b)}
             disabled={!canDelete}
             title={canDelete ? undefined : "Only an owner can delete a behaviour."}
+            aria-describedby={canDelete ? undefined : `delete-reason-${b.id}`}
           >
             Delete
           </Button>
+          {!canDelete && (
+            <span id={`delete-reason-${b.id}`} className="visually-hidden">
+              Only an owner can delete a behaviour.
+            </span>
+          )}
         </div>
       ),
     },
@@ -215,7 +224,9 @@ export function Behaviours() {
             saving={saving}
           />
         )}
-        {list.status === "loading" && <EmptyState variant="loading" title="Loading behaviours…" />}
+        {list.status === "loading" && (
+          <Table columns={columns} rows={[]} getRowKey={(b) => b.id} skeletonRows={5} caption="Loading behaviours" />
+        )}
         {list.status === "error" && (
           <EmptyState
             variant="error"

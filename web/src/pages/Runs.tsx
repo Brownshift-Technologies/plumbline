@@ -21,6 +21,13 @@ const RESULT_KIND: Record<string, PillKind> = {
   running: "info",
 };
 
+function behaviourSummary(run: Run): string {
+  const parts = [`${run.held} held`];
+  if (run.failed) parts.push(`${run.failed} failed`);
+  if (run.repaired) parts.push(`${run.repaired} repaired`);
+  return parts.join(" · ");
+}
+
 function resultLabel(run: Run): string {
   if (run.state === "failed") return `${run.failed} failing`;
   if (run.state === "unstable") return `${run.failed} unstable`;
@@ -98,7 +105,7 @@ export function Runs() {
     },
     { key: "trigger", header: "Trigger", label: "Trigger", render: (r) => r.trigger },
     { key: "result", header: "Result", label: "Result", width: "116px", render: (r) => <Pill kind={RESULT_KIND[r.state] ?? "grey"}>{resultLabel(r)}</Pill> },
-    { key: "behaviours", header: "Behaviours", label: "Behaviours", width: "154px", render: (r) => <span className="n" style={{ color: "var(--muted)" }}>{r.held} held{r.failed ? ` · ${r.failed} failed` : ""}</span> },
+    { key: "behaviours", header: "Behaviours", label: "Behaviours", width: "154px", render: (r) => <span className="n" style={{ color: "var(--muted)" }}>{behaviourSummary(r)}</span> },
     {
       key: "duration",
       header: (
@@ -127,7 +134,7 @@ export function Runs() {
         <Button size="sm" onClick={() => setFilterOpen((o) => !o)} aria-expanded={filterOpen}>
           <Icon name="i-filter" size="xs" /> Filter
         </Button>
-        <Button variant="pri" size="sm">
+        <Button variant="pri" size="sm" onClick={() => navigate(routes.home)}>
           <Icon name="i-plus" size="xs" /> New run
         </Button>
       </div>
@@ -169,7 +176,9 @@ export function Runs() {
       )}
 
       <Panel style={{ marginTop: 18 }}>
-        {runs.status === "loading" && <EmptyState variant="loading" title="Loading runs…" />}
+        {runs.status === "loading" && (
+          <Table columns={columns} rows={[]} getRowKey={(r) => r.id} skeletonRows={6} caption="Loading runs" />
+        )}
         {runs.status === "error" && (
           <EmptyState
             variant="error"

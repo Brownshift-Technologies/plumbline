@@ -111,7 +111,9 @@ export function Findings() {
       )}
 
       <Panel style={{ marginTop: 18 }}>
-        {findings.status === "loading" && <EmptyState variant="loading" title="Loading findings…" />}
+        {findings.status === "loading" && (
+          <Table columns={columns} rows={[]} getRowKey={(f) => f.id} skeletonRows={5} caption="Loading findings" />
+        )}
         {findings.status === "error" && (
           <EmptyState
             variant="error"

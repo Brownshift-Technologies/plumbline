@@ -3,10 +3,12 @@ import QRCode from "qrcode";
 import { Field } from "../../components/Field";
 import { Button } from "../../components/Button";
 import { EmptyState } from "../../components/EmptyState";
+import { SkeletonBlock } from "../../components/Skeleton";
 import { useToast } from "../../components/Toast";
 import { api } from "../../lib/api";
 import { useAsync } from "../../lib/useAsync";
 import type { AsyncState } from "../../lib/useAsync";
+import { isDemoWrite, demoWriteMessage } from "../../lib/demo";
 import type { CurrentUser, Session, TotpEnrollResponse } from "../../lib/types";
 
 function PasswordForm() {
@@ -30,8 +32,8 @@ function PasswordForm() {
     }
     setSaving(true);
     try {
-      await api.post("/auth/password", { current, new: next });
-      show("Password updated. Other sessions signed out.");
+      const res = await api.post("/auth/password", { current, new: next });
+      show(isDemoWrite(res) ? demoWriteMessage("your password would be updated") : "Password updated. Other sessions signed out.");
       setCurrent("");
       setNext("");
       setConfirm("");
@@ -94,8 +96,12 @@ function TotpSection({ user }: { user: AsyncState<CurrentUser> }) {
   async function confirmEnroll() {
     setError(null);
     try {
-      await api.post("/auth/totp/verify", { code });
-      show("Two-factor authentication enabled.");
+      const res = await api.post("/auth/totp/verify", { code });
+      if (isDemoWrite(res)) {
+        show(demoWriteMessage("two-factor authentication would be enabled"));
+      } else {
+        show("Two-factor authentication enabled.");
+      }
       setEnrolling(false);
       setEnroll(null);
       setCode("");
@@ -109,8 +115,8 @@ function TotpSection({ user }: { user: AsyncState<CurrentUser> }) {
     setError(null);
     setRemoving(true);
     try {
-      await api.del("/auth/totp", { code: removeCode });
-      show("Two-factor authentication removed.");
+      const res = await api.del("/auth/totp", { code: removeCode });
+      show(isDemoWrite(res) ? demoWriteMessage("two-factor authentication would be removed") : "Two-factor authentication removed.");
       setRemoveCode("");
       user.reload();
     } catch (err) {
@@ -192,8 +198,8 @@ function SessionsSection() {
 
   async function signOut(id: string, label: string) {
     try {
-      await api.del(`/auth/sessions/${id}`);
-      show(`Signed out of ${label}`);
+      const res = await api.del(`/auth/sessions/${id}`);
+      show(isDemoWrite(res) ? demoWriteMessage(`${label} would be signed out`) : `Signed out of ${label}`);
       sessions.reload();
     } catch (err) {
       show(err instanceof Error ? err.message : "Couldn't sign that session out.");
@@ -202,8 +208,9 @@ function SessionsSection() {
 
   async function signOutEverywhere() {
     const others = rows.filter((s) => !s.current);
-    await Promise.allSettled(others.map((s) => api.del(`/auth/sessions/${s.id}`)));
-    show("Signed out everywhere else.");
+    const results = await Promise.allSettled(others.map((s) => api.del(`/auth/sessions/${s.id}`)));
+    const anyDemo = results.some((r) => r.status === "fulfilled" && isDemoWrite(r.value));
+    show(anyDemo ? demoWriteMessage("every other session would be signed out") : "Signed out everywhere else.");
     sessions.reload();
   }
 
@@ -214,7 +221,25 @@ function SessionsSection() {
         <p>Sign out anywhere you don't recognise.</p>
       </div>
       <div>
-        {sessions.status === "loading" && <EmptyState variant="loading" title="Loading sessions…" />}
+        {sessions.status === "loading" && (
+          <div className="panel" aria-busy="true">
+            <span className="visually-hidden" role="status">Loading sessions…</span>
+            <table>
+              <tbody>
+                {[0, 1].map((i) => (
+                  <tr key={i} data-skeleton-row="">
+                    <td>
+                      <SkeletonBlock width="60%" />
+                    </td>
+                    <td style={{ width: 90 }}>
+                      <SkeletonBlock width={60} height={26} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
         {sessions.status === "error" && (
           <EmptyState variant="error" title="Couldn't load sessions" description={sessions.error} actions={<Button onClick={sessions.reload}>Retry</Button>} />
         )}

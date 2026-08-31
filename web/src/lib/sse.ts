@@ -114,7 +114,15 @@ export function connectRunStream(runId: string, handlers: RunStreamHandlers): ()
 
     source.addEventListener("finished", (event) => {
       try {
-        handlers.onFinished(JSON.parse((event as MessageEvent).data));
+        const finalRun: RunDetail = JSON.parse((event as MessageEvent).data);
+        // The server may finalise with a step that was never separately
+        // streamed as its own "step" event (e.g. the run finished between
+        // this client's last poll/replay and the terminal event) -- run
+        // the payload's steps through the same dedup path pollOnce() uses,
+        // rather than only trusting `onFinished`'s caller to have already
+        // seen every one of them.
+        for (const step of finalRun.steps ?? []) emitStep(step);
+        handlers.onFinished(finalRun);
       } catch {
         // fall through; polling/reconnect below still applies if this repeats
       }

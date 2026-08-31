@@ -8,6 +8,7 @@ import { useToast } from "../components/Toast";
 import { api } from "../lib/api";
 import { useAsync } from "../lib/useAsync";
 import { useCurrentUser } from "../lib/useCurrentUser";
+import { isDemoWrite, demoWriteMessage } from "../lib/demo";
 import type { AgentStatus } from "../lib/types";
 
 const STATE_KIND: Record<string, PillKind> = {
@@ -33,7 +34,11 @@ export function Agents() {
 
   useEffect(() => {
     if (agents.status !== "success") return;
-    const id = window.setInterval(() => agents.reload(), LIVE_REFRESH_MS);
+    // A background refresh, not a reload: queue depth is meant to read as
+    // live, but flipping status back to "loading" every tick would unmount
+    // the whole table (rows, buttons) and replace it with a skeleton every
+    // 5 seconds -- see useAsync's refresh() docstring.
+    const id = window.setInterval(() => agents.refresh(), LIVE_REFRESH_MS);
     return () => window.clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agents.status]);
@@ -43,9 +48,13 @@ export function Agents() {
 
   async function pause(name?: string) {
     try {
-      await api.post("/agents/pause", name ? { agent: name } : undefined);
-      show(name ? `${name} paused.` : "All agents paused.");
-      agents.reload();
+      const res = await api.post("/agents/pause", name ? { agent: name } : undefined);
+      if (isDemoWrite(res)) {
+        show(demoWriteMessage(name ? `${name} would pause` : "every agent would pause"));
+      } else {
+        show(name ? `${name} paused.` : "All agents paused.");
+      }
+      agents.refresh();
     } catch (err) {
       show(err instanceof Error ? err.message : "Couldn't pause.");
     }
@@ -53,9 +62,9 @@ export function Agents() {
 
   async function resume(name: string) {
     try {
-      await api.post("/agents/resume", { agent: name });
-      show(`${name} resumed.`);
-      agents.reload();
+      const res = await api.post("/agents/resume", { agent: name });
+      show(isDemoWrite(res) ? demoWriteMessage(`${name} would resume`) : `${name} resumed.`);
+      agents.refresh();
     } catch (err) {
       show(err instanceof Error ? err.message : "Couldn't resume.");
     }
@@ -75,11 +84,23 @@ export function Agents() {
       width: "90px",
       render: (a) =>
         a.state === "paused" ? (
-          <Button size="sm" onClick={() => resume(a.name)} disabled={!canManage} title={canManage ? undefined : "Only an owner can resume an agent."}>
+          <Button
+            size="sm"
+            onClick={() => resume(a.name)}
+            disabled={!canManage}
+            title={canManage ? undefined : "Only an owner can resume an agent."}
+            aria-describedby={canManage ? undefined : "agent-manage-disabled-reason"}
+          >
             Resume
           </Button>
         ) : (
-          <Button size="sm" onClick={() => pause(a.name)} disabled={!canManage} title={canManage ? undefined : "Only an owner can pause an agent."}>
+          <Button
+            size="sm"
+            onClick={() => pause(a.name)}
+            disabled={!canManage}
+            title={canManage ? undefined : "Only an owner can pause an agent."}
+            aria-describedby={canManage ? undefined : "agent-manage-disabled-reason"}
+          >
             Pause
           </Button>
         ),
@@ -94,12 +115,25 @@ export function Agents() {
           <p>Seven specialists. Each one has a scoped set of tools and nothing more.</p>
         </div>
         <span className="sp" />
-        <Button size="sm" onClick={() => pause()} disabled={!canManage} title={canManage ? undefined : "Only an owner can pause the fleet."}>
+        <Button
+          size="sm"
+          onClick={() => pause()}
+          disabled={!canManage}
+          title={canManage ? undefined : "Only an owner can pause the fleet."}
+          aria-describedby={canManage ? undefined : "agent-manage-disabled-reason"}
+        >
           Pause all
         </Button>
+        {!canManage && (
+          <span id="agent-manage-disabled-reason" className="visually-hidden">
+            Only an owner can pause or resume an agent.
+          </span>
+        )}
       </div>
       <Panel style={{ marginTop: 18 }}>
-        {agents.status === "loading" && <EmptyState variant="loading" title="Checking on the fleet…" />}
+        {agents.status === "loading" && (
+          <Table columns={columns} rows={[]} getRowKey={(a) => a.name} skeletonRows={5} caption="Loading agents" />
+        )}
         {agents.status === "error" && (
           <EmptyState
             variant="error"

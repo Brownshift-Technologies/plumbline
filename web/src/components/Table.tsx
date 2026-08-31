@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { SkeletonBlock } from "./Skeleton";
 
 /**
  * A table that stacks into cards below the STACK breakpoint (see
@@ -23,6 +24,13 @@ export interface TableProps<T> {
   getRowKey: (row: T) => string | number;
   onRowClick?: (row: T) => void;
   caption?: string;
+  /**
+   * Loading state: renders this many shaped placeholder rows -- same
+   * column count and widths as the real table -- instead of `rows`. Every
+   * placeholder `<tr>` carries `data-skeleton-row` so a test can assert on
+   * row-shaped DOM rather than on any particular loading text.
+   */
+  skeletonRows?: number;
 }
 
 export function Table<T>({
@@ -31,10 +39,17 @@ export function Table<T>({
   getRowKey,
   onRowClick,
   caption,
+  skeletonRows,
 }: TableProps<T>) {
+  const loading = skeletonRows !== undefined;
+
   return (
-    <table>
-      {caption && <caption style={{ position: "absolute", left: -9999 }}>{caption}</caption>}
+    <table aria-busy={loading || undefined}>
+      {(caption || loading) && (
+        <caption className="visually-hidden" role={loading ? "status" : undefined}>
+          {loading ? (caption ?? "Loading…") : caption}
+        </caption>
+      )}
       <thead>
         <tr>
           {columns.map((col) => (
@@ -45,38 +60,44 @@ export function Table<T>({
         </tr>
       </thead>
       <tbody>
-        {rows.map((row) => {
-          const key = getRowKey(row);
-          const clickable = Boolean(onRowClick);
-          return (
-            <tr
-              key={key}
-              tabIndex={clickable ? 0 : undefined}
-              role={clickable ? "button" : undefined}
-              onClick={clickable ? () => onRowClick?.(row) : undefined}
-              onKeyDown={
-                clickable
-                  ? (e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        onRowClick?.(row);
-                      }
-                    }
-                  : undefined
-              }
-            >
-              {columns.map((col) => (
-                <td
-                  key={col.key}
-                  data-label={col.label}
-                  data-primary={col.primary ? "" : undefined}
+        {loading
+          ? Array.from({ length: skeletonRows }).map((_, i) => (
+              <tr key={i} data-skeleton-row="">
+                {columns.map((col, ci) => (
+                  <td key={col.key} data-label={col.label} data-primary={col.primary ? "" : undefined}>
+                    <SkeletonBlock width={ci === 0 ? "60%" : `${75 - (i % 3) * 10}%`} />
+                  </td>
+                ))}
+              </tr>
+            ))
+          : rows.map((row) => {
+              const key = getRowKey(row);
+              const clickable = Boolean(onRowClick);
+              return (
+                <tr
+                  key={key}
+                  tabIndex={clickable ? 0 : undefined}
+                  role={clickable ? "button" : undefined}
+                  onClick={clickable ? () => onRowClick?.(row) : undefined}
+                  onKeyDown={
+                    clickable
+                      ? (e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            onRowClick?.(row);
+                          }
+                        }
+                      : undefined
+                  }
                 >
-                  {col.render(row)}
-                </td>
-              ))}
-            </tr>
-          );
-        })}
+                  {columns.map((col) => (
+                    <td key={col.key} data-label={col.label} data-primary={col.primary ? "" : undefined}>
+                      {col.render(row)}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
       </tbody>
     </table>
   );

@@ -38,10 +38,11 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-test("shows a loading state while the account loads", () => {
+test("shows shimmering placeholder blocks while the account loads, not a spinner over a blank page", () => {
   vi.mocked(fetch).mockImplementation(() => new Promise(() => {}));
   renderSettings();
-  expect(screen.getByText("Loading your account…")).toBeInTheDocument();
+  expect(document.querySelectorAll(".skel").length).toBeGreaterThan(0);
+  expect(document.querySelector(".tile")).not.toBeInTheDocument();
 });
 
 test("shows what failed and a retry when the account cannot be loaded", async () => {

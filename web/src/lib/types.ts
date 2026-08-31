@@ -22,6 +22,14 @@ export interface CurrentUser {
    * simply hasn't added yet. See RunDetail's gate-disabled logic.
    */
   totp_enabled?: boolean;
+  /**
+   * Undefined (not `false`) unless the backend actually reports it. The
+   * design mockup shows one fixed "Verified" state, but that is not a data
+   * contract Task 8a's documented `/me` response promises -- ProfilePane
+   * renders the badge only when this is explicitly `true`, a distinct
+   * "Not verified" pill when explicitly `false`, and neither when unknown.
+   */
+  email_verified?: boolean;
 }
 
 export interface Run {

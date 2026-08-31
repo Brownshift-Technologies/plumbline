@@ -126,3 +126,23 @@ test("disposing the stream tears down the EventSource and stops any pending reco
   // No new EventSource is opened after disposal.
   expect(FakeEventSource.instances).toHaveLength(1);
 });
+
+test("the finished event's own steps are run through the same dedup path, so a step that only ever appeared in the terminal payload is not dropped", () => {
+  const onStep = vi.fn();
+  const onFinished = vi.fn();
+  const dispose = connectRunStream("r1", { onStep, onFinished });
+
+  const es = FakeEventSource.instances[0];
+  es.triggerOpen();
+  const seenStep = { id: "s1", agent: "cartographer", summary: "mapped", detail: "", outcome: "ok", duration_ms: 100, at: 1, run_id: "r1" };
+  const finalOnlyStep = { id: "s2", agent: "surgeon", summary: "opened the pull request", detail: "", outcome: "ok", duration_ms: 50, at: 2, run_id: "r1" };
+  es.emit("step", seenStep);
+  // The server finalises with BOTH steps in its payload -- s1 (already
+  // streamed) and s2 (never sent as its own "step" event).
+  es.emit("finished", { id: "r1", state: "passed", steps: [seenStep, finalOnlyStep] });
+
+  expect(onStep).toHaveBeenCalledTimes(2);
+  expect(onStep).toHaveBeenCalledWith(finalOnlyStep);
+  expect(onFinished).toHaveBeenCalledTimes(1);
+  dispose();
+});

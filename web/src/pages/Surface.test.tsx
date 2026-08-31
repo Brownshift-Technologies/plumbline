@@ -26,10 +26,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-test("shows skeleton loading, not a spinner over a blank page", () => {
+test("shows shimmering placeholder blocks while loading, not a spinner over a blank page", () => {
   vi.mocked(fetch).mockImplementation(() => new Promise(() => {}));
   renderSurface();
-  expect(screen.getByText("Mapping the repository…")).toBeInTheDocument();
+  expect(document.querySelectorAll(".skel").length).toBeGreaterThan(0);
+  expect(document.querySelector(".tile")).not.toBeInTheDocument();
+  expect(screen.queryByText("Mapping the repository…")).not.toBeInTheDocument();
 });
 
 test("shows a real reason and a next action when nothing has been mapped", async () => {

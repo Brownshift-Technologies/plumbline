@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { EmptyState } from "../components/EmptyState";
 import { Button } from "../components/Button";
+import { SkeletonBlock, SkeletonLines } from "../components/Skeleton";
 import { useToast } from "../components/Toast";
 import { api } from "../lib/api";
 import { useCurrentUser } from "../lib/useCurrentUser";
@@ -60,7 +61,13 @@ export function Settings() {
         ))}
       </div>
 
-      {user.status === "loading" && <EmptyState variant="loading" title="Loading your account…" />}
+      {user.status === "loading" && (
+        <div style={{ padding: "20px 0" }} aria-busy="true">
+          <span className="visually-hidden" role="status">Loading your account…</span>
+          <SkeletonBlock width="20%" height={14} style={{ marginBottom: 14 }} />
+          <SkeletonLines count={4} />
+        </div>
+      )}
       {user.status === "error" && (
         <EmptyState variant="error" title="Couldn't load your account" description={user.error} actions={<Button onClick={user.reload}>Retry</Button>} />
       )}

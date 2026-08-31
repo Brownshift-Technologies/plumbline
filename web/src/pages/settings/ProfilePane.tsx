@@ -5,6 +5,7 @@ import { Pill } from "../../components/Pill";
 import { Icon } from "../../components/Icon";
 import { useToast } from "../../components/Toast";
 import { api, ApiError } from "../../lib/api";
+import { isDemoWrite, demoWriteMessage } from "../../lib/demo";
 import type { AsyncState } from "../../lib/useAsync";
 import type { CurrentUser } from "../../lib/types";
 
@@ -34,11 +35,33 @@ export function ProfilePane({ user }: { user: AsyncState<CurrentUser> }) {
     const form = new FormData();
     form.append("photo", file);
     try {
-      await api.post("/auth/photo", form);
-      show("Photo updated.");
+      const res = await api.post("/auth/photo", form);
+      show(isDemoWrite(res) ? demoWriteMessage("this photo would be uploaded") : "Photo updated.");
       user.reload();
     } catch (err) {
-      show(err instanceof ApiError && err.status === 404 ? "Photo upload isn't available yet." : err instanceof Error ? err.message : "Couldn't upload that photo.");
+      show(
+        err instanceof ApiError && err.status === 404
+          ? "Photo upload isn't available yet."
+          : err instanceof Error
+            ? err.message
+            : "Couldn't upload that photo.",
+      );
+    }
+  }
+
+  async function onRemovePhoto() {
+    try {
+      const res = await api.del("/auth/photo");
+      show(isDemoWrite(res) ? demoWriteMessage("this photo would be removed") : "Photo removed.");
+      user.reload();
+    } catch (err) {
+      show(
+        err instanceof ApiError && err.status === 404
+          ? "Photo removal isn't available yet."
+          : err instanceof Error
+            ? err.message
+            : "Couldn't remove that photo.",
+      );
     }
   }
 
@@ -46,8 +69,8 @@ export function ProfilePane({ user }: { user: AsyncState<CurrentUser> }) {
     setError(null);
     setSaving(true);
     try {
-      await api.patch("/auth/me", { name, email });
-      show("Profile saved");
+      const res = await api.patch("/auth/me", { name, email });
+      show(isDemoWrite(res) ? demoWriteMessage("your profile would be saved") : "Profile saved");
       user.reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't save your profile.");
@@ -69,7 +92,7 @@ export function ProfilePane({ user }: { user: AsyncState<CurrentUser> }) {
           </span>
           <input ref={fileInput} type="file" accept="image/*" hidden onChange={onUpload} aria-label="Upload photo" />
           <Button onClick={() => fileInput.current?.click()}>Upload</Button>
-          <Button onClick={() => show("Photo removed.")}>Remove</Button>
+          <Button onClick={onRemovePhoto}>Remove</Button>
         </div>
       </div>
       <div className="setrow">
@@ -86,9 +109,12 @@ export function ProfilePane({ user }: { user: AsyncState<CurrentUser> }) {
         </div>
         <div>
           <Field label="Work email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-          <Pill kind="pass">
-            <Icon name="i-check" size="xs" /> Verified
-          </Pill>
+          {user.data?.email_verified === true && (
+            <Pill kind="pass">
+              <Icon name="i-check" size="xs" /> Verified
+            </Pill>
+          )}
+          {user.data?.email_verified === false && <Pill kind="warn">Not verified</Pill>}
         </div>
       </div>
       <div className="setrow">

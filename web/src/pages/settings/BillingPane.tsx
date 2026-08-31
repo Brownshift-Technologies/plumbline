@@ -1,9 +1,11 @@
 import { Button } from "../../components/Button";
 import { EmptyState } from "../../components/EmptyState";
+import { SkeletonBlock, SkeletonLines } from "../../components/Skeleton";
 import { useToast } from "../../components/Toast";
 import { api, ApiError } from "../../lib/api";
 import { useAsync } from "../../lib/useAsync";
 import type { AsyncState } from "../../lib/useAsync";
+import { isDemoWrite, demoWriteMessage } from "../../lib/demo";
 import type { BillingInfo, BillingInvoice, CurrentUser } from "../../lib/types";
 
 function Meter({ label, used, limit }: { label: string; used: number; limit: number }) {
@@ -22,7 +24,14 @@ function Meter({ label, used, limit }: { label: string; used: number; limit: num
 
 function InvoiceHistory() {
   const invoices = useAsync<BillingInvoice[]>(() => api.get<BillingInvoice[]>("/billing/invoices"), []);
-  if (invoices.status === "loading") return <EmptyState variant="loading" title="Loading invoices…" />;
+  if (invoices.status === "loading") {
+    return (
+      <div style={{ padding: "14px 16px" }} aria-busy="true">
+        <span className="visually-hidden" role="status">Loading invoices…</span>
+        <SkeletonLines count={3} widths={["70%", "55%", "60%"]} />
+      </div>
+    );
+  }
   // Not every workspace's billing history is wired up yet; a failure here
   // reads as "no invoices on file" rather than an alarming, page-level error
   // -- this section is a footnote to the plan/usage/payment-method rows
@@ -55,8 +64,8 @@ export function BillingPane({ user }: { user: AsyncState<CurrentUser> }) {
 
   async function onChangePlan() {
     try {
-      await api.post("/billing/plan", {});
-      show("Plan change request sent.");
+      const res = await api.post("/billing/plan", {});
+      show(isDemoWrite(res) ? demoWriteMessage("your plan would change") : "Plan change request sent.");
       billing.reload();
     } catch (err) {
       show(err instanceof Error ? err.message : "Couldn't change your plan.");
@@ -65,14 +74,32 @@ export function BillingPane({ user }: { user: AsyncState<CurrentUser> }) {
 
   async function onUpdatePayment() {
     try {
-      const res = await api.post<{ url: string }>("/billing/portal");
+      const res = await api.post<{ url: string; demo?: boolean; persisted?: boolean }>("/billing/portal");
+      if (isDemoWrite(res)) {
+        show(demoWriteMessage("you'd be sent to the billing portal"));
+        return;
+      }
       if (res.url) window.location.href = res.url;
     } catch (err) {
       show(err instanceof ApiError && err.status === 404 ? "The billing portal isn't available yet." : err instanceof Error ? err.message : "Couldn't open the billing portal.");
     }
   }
 
-  if (billing.status === "loading") return <EmptyState variant="loading" title="Loading billing…" />;
+  if (billing.status === "loading") {
+    return (
+      <div aria-busy="true">
+        <span className="visually-hidden" role="status">Loading billing…</span>
+        <div className="setrow">
+          <div><SkeletonBlock width="30%" height={16} /></div>
+          <div><SkeletonBlock width="40%" height={28} /></div>
+        </div>
+        <div className="setrow">
+          <div><SkeletonBlock width="40%" height={16} /></div>
+          <div style={{ maxWidth: 370 }}><SkeletonLines count={2} /></div>
+        </div>
+      </div>
+    );
+  }
   if (billing.status === "error") {
     return <EmptyState variant="error" title="Couldn't load billing" description={billing.error} actions={<Button onClick={billing.reload}>Retry</Button>} />;
   }
@@ -97,7 +124,12 @@ export function BillingPane({ user }: { user: AsyncState<CurrentUser> }) {
             {data.run_limit} runs, {data.seat_limit} seats, unlimited behaviours.
           </p>
           <div style={{ marginTop: 13, display: "flex", gap: 8 }}>
-            <Button onClick={onChangePlan} disabled={!canManage} title={canManage ? undefined : "Only an owner can change the plan."}>
+            <Button
+              onClick={onChangePlan}
+              disabled={!canManage}
+              title={canManage ? undefined : "Only an owner can change the plan."}
+              aria-describedby={canManage ? undefined : "billing-manage-reason"}
+            >
               Change plan
             </Button>
           </div>
@@ -119,9 +151,16 @@ export function BillingPane({ user }: { user: AsyncState<CurrentUser> }) {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
           <span className="mono" style={{ color: "var(--muted)" }}>{data.payment_method || "No payment method on file"}</span>
-          <Button size="sm" onClick={onUpdatePayment} disabled={!canManage} title={canManage ? undefined : "Only an owner can update billing."}>
+          <Button
+            size="sm"
+            onClick={onUpdatePayment}
+            disabled={!canManage}
+            title={canManage ? undefined : "Only an owner can update billing."}
+            aria-describedby={canManage ? undefined : "billing-manage-reason"}
+          >
             Update
           </Button>
+          {!canManage && <span id="billing-manage-reason" className="visually-hidden">Only an owner can manage billing.</span>}
         </div>
       </div>
       <div className="setrow">

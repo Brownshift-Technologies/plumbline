@@ -5,12 +5,14 @@ import { Panel } from "../components/Panel";
 import { Pill, type PillKind } from "../components/Pill";
 import { Button } from "../components/Button";
 import { EmptyState } from "../components/EmptyState";
+import { SkeletonBlock, SkeletonLines } from "../components/Skeleton";
 import { Diff } from "../components/Diff";
 import { useToast } from "../components/Toast";
 import { api } from "../lib/api";
 import { useAsync } from "../lib/useAsync";
 import { useCurrentUser } from "../lib/useCurrentUser";
 import { connectRunStream, type StreamStatus } from "../lib/sse";
+import { isDemoWrite, demoWriteMessage } from "../lib/demo";
 import { formatClock, formatDuration, relativeTime } from "../lib/time";
 import { routes } from "../lib/routes";
 import type { Finding, Patch, RunDetail as RunDetailData, RunStep } from "../lib/types";
@@ -31,6 +33,13 @@ function resultLabel(run: RunDetailData): string {
   if (run.state === "running") return "Running";
   if (run.state === "queued") return "Queued";
   return "All held";
+}
+
+function behaviourSummary(run: RunDetailData): string {
+  const parts = [`${run.held} held`];
+  if (run.failed) parts.push(`${run.failed} failed`);
+  if (run.repaired) parts.push(`${run.repaired} repaired`);
+  return parts.join(" · ");
 }
 
 const STEP_KIND: Record<string, PillKind> = {
@@ -73,6 +82,7 @@ export function RunDetail() {
   const [steps, setSteps] = useState<RunStep[]>([]);
   const [finalRun, setFinalRun] = useState<RunDetailData | null>(null);
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("connecting");
+  const [lastAnnouncedStep, setLastAnnouncedStep] = useState<string>("");
   const seenStepIds = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -95,6 +105,7 @@ export function RunDetail() {
         if (seenStepIds.current.has(step.id)) return;
         seenStepIds.current.add(step.id);
         setSteps((prev) => [...prev, step].sort((a, b) => a.at - b.at));
+        setLastAnnouncedStep(`${step.agent}: ${step.summary}`);
       },
       onFinished: setFinalRun,
       onStatusChange: setStreamStatus,
@@ -118,6 +129,8 @@ export function RunDetail() {
   const [approving, setApproving] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectNote, setRejectNote] = useState("");
+  const [changesOpen, setChangesOpen] = useState(false);
+  const [changesNote, setChangesNote] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
 
   const gatedStep = steps.find((s) => s.agent === "surgeon" && s.outcome === "gated");
@@ -137,8 +150,14 @@ export function RunDetail() {
     setApproving(true);
     setActionError(null);
     try {
-      const res = await api.post<{ already_approved?: boolean }>(`/findings/${findingId}/patch/approve`);
-      show(res.already_approved ? "Already approved." : "Patch approved. Merging the pull request.");
+      const res = await api.post<{ already_approved?: boolean; demo?: boolean; persisted?: boolean }>(
+        `/findings/${findingId}/patch/approve`,
+      );
+      if (isDemoWrite(res)) {
+        show(demoWriteMessage("this is where the pull request would merge"));
+      } else {
+        show(res.already_approved ? "Already approved." : "Patch approved. Merging the pull request.");
+      }
       patchQuery.reload();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Couldn't approve this patch.");
@@ -151,8 +170,8 @@ export function RunDetail() {
     if (!findingId || rejectNote.trim().length < 10) return;
     setActionError(null);
     try {
-      await api.post(`/findings/${findingId}/patch/reject`, { note: rejectNote.trim() });
-      show("Patch rejected. The finding stays open.");
+      const res = await api.post(`/findings/${findingId}/patch/reject`, { note: rejectNote.trim() });
+      show(isDemoWrite(res) ? demoWriteMessage("this patch would be rejected") : "Patch rejected. The finding stays open.");
       setRejectOpen(false);
       setRejectNote("");
       patchQuery.reload();
@@ -165,18 +184,43 @@ export function RunDetail() {
     if (!findingId) return;
     setActionError(null);
     try {
-      await api.post(`/findings/${findingId}/patch/changes`, { note: rejectNote.trim() || undefined });
-      show("Requested changes. Surgeon will try again.");
+      const res = await api.post(`/findings/${findingId}/patch/changes`, { note: changesNote.trim() || undefined });
+      show(isDemoWrite(res) ? demoWriteMessage("changes would be requested from Surgeon") : "Requested changes. Surgeon will try again.");
+      setChangesOpen(false);
+      setChangesNote("");
       patchQuery.reload();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Couldn't request changes.");
     }
   }
 
+  async function onCancel() {
+    if (!run) return;
+    try {
+      const res = await api.post(`/runs/${run.id}/cancel`);
+      show(isDemoWrite(res) ? demoWriteMessage("this run would be cancelled") : "Run cancelled.");
+      runQuery.reload();
+    } catch (err) {
+      show(err instanceof Error ? err.message : "Couldn't cancel this run.");
+    }
+  }
+
   if (runQuery.status === "loading" && !run) {
     return (
       <div className="body">
-        <EmptyState variant="loading" title={`Loading run ${runId}…`} />
+        <div className="pagehead" aria-busy="true">
+          <span className="visually-hidden" role="status">
+            Loading run {runId}…
+          </span>
+          <SkeletonBlock width={90} height={28} style={{ marginBottom: 14 }} />
+          <SkeletonBlock width="40%" height={26} style={{ marginBottom: 10 }} />
+          <SkeletonBlock width="60%" height={15} />
+        </div>
+        <Panel title="Reasoning chain" style={{ marginTop: 20 }}>
+          <div style={{ padding: "12px 16px" }}>
+            <SkeletonLines count={4} />
+          </div>
+        </Panel>
       </div>
     );
   }
@@ -211,22 +255,14 @@ export function RunDetail() {
               {run.state === "running" || run.state === "queued" ? "started" : "finished"}{" "}
               {relativeTime(run.started_at)}
             </p>
+            <p className="n" style={{ marginTop: 4, fontSize: 13.5, color: "var(--muted)" }}>
+              {behaviourSummary(run)}
+            </p>
           </div>
           <span className="sp" />
           <Button>Replay deterministically</Button>
           {(run.state === "queued" || run.state === "running") && (
-            <Button
-              variant="dang"
-              onClick={() =>
-                api
-                  .post(`/runs/${run.id}/cancel`)
-                  .then(() => {
-                    show("Run cancelled.");
-                    runQuery.reload();
-                  })
-                  .catch((err) => show(err instanceof Error ? err.message : "Couldn't cancel this run."))
-              }
-            >
+            <Button variant="dang" onClick={onCancel}>
               Cancel run
             </Button>
           )}
@@ -251,6 +287,8 @@ export function RunDetail() {
                 {finding && <span className="mono">{finding.route}</span>}
                 {finding && <span>·</span>}
                 {finding && <span>Reproduced {finding.repro_count} of {finding.repro_count}</span>}
+                {finding?.seed && <span>·</span>}
+                {finding?.seed && <span>Seed <span className="mono">{finding.seed}</span></span>}
                 <span>·</span>
                 <span>This patch needs an owner's sign-off before it can merge.</span>
               </div>
@@ -260,6 +298,11 @@ export function RunDetail() {
       )}
 
       <h2>What the agents did</h2>
+      {/* A visually-hidden live region announces each new step as it streams
+          in, without re-announcing the whole chain on every render. */}
+      <div className="visually-hidden" role="status" aria-live="polite">
+        {lastAnnouncedStep}
+      </div>
       <Panel
         title="Reasoning chain"
         headerExtra={
@@ -268,7 +311,12 @@ export function RunDetail() {
           </span>
         }
       >
-        {steps.length === 0 ? (
+        {steps.length === 0 && runQuery.status === "loading" ? (
+          <div style={{ padding: "12px 16px" }} aria-busy="true">
+            <span className="visually-hidden" role="status">Loading the reasoning chain…</span>
+            <SkeletonLines count={4} />
+          </div>
+        ) : steps.length === 0 ? (
           <EmptyState
             variant={run.state === "queued" ? "empty" : "loading"}
             title={run.state === "queued" ? "Queued" : "Waiting for the first step…"}
@@ -322,7 +370,12 @@ export function RunDetail() {
             }
           >
             <div style={{ padding: "14px 16px" }}>
-              {patchQuery.status === "loading" && <EmptyState variant="loading" title="Loading the proposed patch…" />}
+              {patchQuery.status === "loading" && (
+                <div aria-busy="true">
+                  <span className="visually-hidden" role="status">Loading the proposed patch…</span>
+                  <SkeletonLines count={6} widths={["100%", "92%", "88%", "70%", "95%", "60%"]} />
+                </div>
+              )}
               {patchQuery.status === "error" && (
                 <EmptyState
                   variant="error"
@@ -337,22 +390,53 @@ export function RunDetail() {
               {patch && (
                 <>
                   <Diff patch={patch.diff} />
+                  {patch.verified && (
+                    <p style={{ marginTop: 12, fontSize: 13.5, color: "var(--muted)", lineHeight: 1.6 }}>
+                      <Icon name="i-check" size="xs" /> Verified: re-run against the same seed and
+                      latency, then the full suite. The patch reverts itself if either check fails.
+                    </p>
+                  )}
                   {actionError && (
                     <p role="alert" style={{ marginTop: 10, fontSize: 13.5, color: "var(--fail)" }}>
                       {actionError}
                     </p>
                   )}
                   <div className="acts">
-                    <Button variant="pri" onClick={onApprove} disabled={Boolean(approveDisabledReason) || approving}>
+                    <Button
+                      variant="pri"
+                      onClick={onApprove}
+                      disabled={Boolean(approveDisabledReason) || approving}
+                      aria-describedby={approveDisabledReason ? "approve-disabled-reason" : undefined}
+                    >
                       {approving ? "Approving…" : "Approve and merge"}
                     </Button>
-                    <Button onClick={onRequestChanges}>Request changes</Button>
+                    <Button onClick={() => setChangesOpen((o) => !o)} aria-expanded={changesOpen}>
+                      Request changes
+                    </Button>
                     <Button variant="dang" onClick={() => setRejectOpen((o) => !o)} aria-expanded={rejectOpen}>
                       Reject
                     </Button>
                   </div>
                   {approveDisabledReason && (
-                    <p style={{ marginTop: 8, fontSize: 13, color: "var(--muted)" }}>{approveDisabledReason}</p>
+                    <p id="approve-disabled-reason" style={{ marginTop: 8, fontSize: 13, color: "var(--muted)" }}>
+                      {approveDisabledReason}
+                    </p>
+                  )}
+                  {changesOpen && (
+                    <div style={{ marginTop: 12 }}>
+                      <label htmlFor="changes-note" style={{ fontSize: 13, fontWeight: 600, color: "var(--ink2)" }}>
+                        What should change? (optional)
+                      </label>
+                      <textarea
+                        id="changes-note"
+                        value={changesNote}
+                        onChange={(e) => setChangesNote(e.target.value)}
+                        style={{ width: "100%", marginTop: 6, padding: 9, border: "1px solid var(--line)", borderRadius: 7, minHeight: 60 }}
+                      />
+                      <div style={{ marginTop: 8 }}>
+                        <Button onClick={onRequestChanges}>Send to Surgeon</Button>
+                      </div>
+                    </div>
                   )}
                   {rejectOpen && (
                     <div style={{ marginTop: 12 }}>
@@ -363,8 +447,15 @@ export function RunDetail() {
                         id="reject-note"
                         value={rejectNote}
                         onChange={(e) => setRejectNote(e.target.value)}
+                        aria-describedby="reject-note-hint"
+                        aria-invalid={rejectNote.length > 0 && rejectNote.trim().length < 10}
                         style={{ width: "100%", marginTop: 6, padding: 9, border: "1px solid var(--line)", borderRadius: 7, minHeight: 60 }}
                       />
+                      <p id="reject-note-hint" role="alert" style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 4 }}>
+                        {rejectNote.trim().length < 10
+                          ? `${10 - rejectNote.trim().length} more character${10 - rejectNote.trim().length === 1 ? "" : "s"} needed.`
+                          : "Ready to submit."}
+                      </p>
                       <div style={{ marginTop: 8 }}>
                         <Button variant="dang" onClick={onReject} disabled={rejectNote.trim().length < 10}>
                           Confirm reject

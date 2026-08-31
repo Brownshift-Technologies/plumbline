@@ -42,19 +42,21 @@ function VerifyChain() {
       <Button variant="pri" onClick={verify} disabled={state === "checking"}>
         {state === "checking" ? "Verifying…" : "Verify chain"}
       </Button>
-      {state === "intact" && (
-        <Pill kind="pass">
-          Chain intact · {checked} entries checked
-        </Pill>
-      )}
-      {state === "tampered" && (
-        <Pill kind="fail">Chain tampered -- do not trust this ledger</Pill>
-      )}
-      {state === "error" && (
-        <span role="alert" style={{ fontSize: 13.5, color: "var(--fail)" }}>
-          {error}
-        </span>
-      )}
+      <div role="status" aria-live="polite">
+        {state === "intact" && (
+          <Pill kind="pass">
+            Chain intact · {checked} entries checked
+          </Pill>
+        )}
+      </div>
+      <div role="alert">
+        {state === "tampered" && (
+          <Pill kind="fail">Chain tampered -- do not trust this ledger</Pill>
+        )}
+        {state === "error" && (
+          <span style={{ fontSize: 13.5, color: "var(--fail)" }}>{error}</span>
+        )}
+      </div>
     </div>
   );
 }
@@ -95,7 +97,9 @@ export function Ledger() {
       <VerifyChain />
 
       <Panel style={{ marginTop: 18 }}>
-        {ledger.status === "loading" && <EmptyState variant="loading" title="Loading the ledger…" />}
+        {ledger.status === "loading" && (
+          <Table columns={columns} rows={[]} getRowKey={(e) => e.signature} skeletonRows={6} caption="Loading the ledger" />
+        )}
         {ledger.status === "error" && (
           <EmptyState
             variant="error"

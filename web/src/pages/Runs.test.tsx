@@ -15,14 +15,17 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-test("shows skeleton loading rows, not a spinner over a blank page", () => {
+test("shows shaped skeleton rows, not a spinner over a blank page", () => {
   vi.mocked(fetch).mockImplementation(() => new Promise(() => {}));
   render(
     <MemoryRouter>
       <Runs />
     </MemoryRouter>,
   );
-  expect(screen.getByText("Loading runs…")).toBeInTheDocument();
+  const skeletonRows = document.querySelectorAll("tr[data-skeleton-row]");
+  expect(skeletonRows.length).toBeGreaterThan(0);
+  expect(screen.getByRole("table")).toHaveAttribute("aria-busy", "true");
+  expect(screen.queryByText("Loading runs…")).not.toBeInTheDocument();
 });
 
 test("shows a real reason and a next action when there are no runs yet", async () => {

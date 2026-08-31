@@ -135,7 +135,7 @@ export function SignIn() {
               placeholder="you@company.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              aria-invalid={Boolean(emailError)}
+              invalid={Boolean(emailError)}
               hint={emailError ?? undefined}
               autoComplete="email"
             />
@@ -145,7 +145,7 @@ export function SignIn() {
               placeholder="••••••••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              aria-invalid={Boolean(passwordError)}
+              invalid={Boolean(passwordError)}
               hint={passwordError ?? undefined}
               autoComplete="current-password"
             />

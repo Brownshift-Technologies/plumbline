@@ -15,10 +15,13 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-test("shows skeleton loading, not a spinner over a blank page", () => {
+test("shows shaped skeleton rows while loading, not a spinner over a blank page", () => {
   vi.mocked(fetch).mockImplementation(() => new Promise(() => {}));
   render(<Ledger />);
-  expect(screen.getByText("Loading the ledger…")).toBeInTheDocument();
+  const skeletonRows = document.querySelectorAll("tr[data-skeleton-row]");
+  expect(skeletonRows.length).toBeGreaterThan(0);
+  expect(screen.getByRole("table")).toHaveAttribute("aria-busy", "true");
+  expect(screen.queryByText("Loading the ledger…")).not.toBeInTheDocument();
 });
 
 test("shows a real reason when nothing has been recorded yet", async () => {
@@ -57,7 +60,7 @@ test("verify chain reports tampering as clearly as it reports intact", async () 
   });
   render(<Ledger />);
   await user.click(await screen.findByRole("button", { name: "Verify chain" }));
-  expect(await screen.findByText("Chain tampered -- do not trust this ledger")).toBeInTheDocument();
+  expect(await screen.findByRole("alert")).toHaveTextContent("Chain tampered -- do not trust this ledger");
 });
 
 test("the export control is a real link to the CSV endpoint, not a JS stub", () => {

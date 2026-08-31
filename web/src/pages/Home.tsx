@@ -5,10 +5,12 @@ import { Panel } from "../components/Panel";
 import { Pill, type PillKind } from "../components/Pill";
 import { Button } from "../components/Button";
 import { EmptyState } from "../components/EmptyState";
+import { SkeletonLines } from "../components/Skeleton";
 import { Table, type TableColumn } from "../components/Table";
 import { api } from "../lib/api";
 import { useAsync } from "../lib/useAsync";
 import { useCurrentUser } from "../lib/useCurrentUser";
+import { isDemoWrite, demoWriteMessage } from "../lib/demo";
 import { greeting, relativeTime, formatDuration } from "../lib/time";
 import { routes } from "../lib/routes";
 import type { Finding, Run, RunListResponse } from "../lib/types";
@@ -36,6 +38,13 @@ function resultLabel(run: Run): string {
   if (run.state === "cancelled") return "Cancelled";
   if (run.state === "running" || run.state === "queued") return "In progress";
   return "All held";
+}
+
+function behaviourSummary(run: Run): string {
+  const parts = [`${run.held} held`];
+  if (run.failed) parts.push(`${run.failed} failed`);
+  if (run.repaired) parts.push(`${run.repaired} repaired`);
+  return parts.join(" · ");
 }
 
 const STATUS_KIND: Record<string, PillKind> = {
@@ -69,11 +78,7 @@ const runColumns: TableColumn<Run>[] = [
     header: "Behaviours",
     label: "Behaviours",
     width: "154px",
-    render: (r) => (
-      <span className="n" style={{ color: "var(--muted)" }}>
-        {r.held} held{r.failed ? ` · ${r.failed} failed` : r.repaired ? ` · ${r.repaired} repaired` : ""}
-      </span>
-    ),
+    render: (r) => <span className="n" style={{ color: "var(--muted)" }}>{behaviourSummary(r)}</span>,
   },
   { key: "duration", header: "Duration", label: "Duration", width: "104px", render: (r) => <span className="n" style={{ color: "var(--muted)" }}>{formatDuration(r.duration_ms)}</span> },
   { key: "who", header: "Started by", label: "Started by", width: "136px", render: (r) => r.started_by },
@@ -85,6 +90,7 @@ export function Home() {
   const [prompt, setPrompt] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [demoNotice, setDemoNotice] = useState<string | null>(null);
 
   const attention = useAsync<Finding[]>(
     () => api.get<Finding[]>("/findings?status=patch_ready"),
@@ -95,12 +101,20 @@ export function Home() {
 
   async function startRun(trigger: string) {
     setCreateError(null);
+    setDemoNotice(null);
     setCreating(true);
     try {
-      const res = await api.post<{ id: string; demo?: boolean }>("/runs", { trigger });
+      const res = await api.post<{ id: string; demo?: boolean; persisted?: boolean }>("/runs", { trigger });
       setPrompt("");
-      if (res.id) navigate(routes.run(res.id));
-      else runs.reload();
+      if (isDemoWrite(res)) {
+        setDemoNotice(demoWriteMessage("this run would start"));
+        runs.reload();
+      } else if (res.id) {
+        navigate(routes.run(res.id));
+        return;
+      } else {
+        runs.reload();
+      }
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : "Couldn't start that run.");
     } finally {
@@ -160,6 +174,11 @@ export function Home() {
             {createError}
           </p>
         )}
+        {demoNotice && (
+          <p role="status" style={{ marginTop: 10, fontSize: 13.5, color: "var(--brand)" }}>
+            {demoNotice}
+          </p>
+        )}
         <p className="disc">
           Plumbline writes and runs the test. It never merges anything without your
           approval.
@@ -190,7 +209,12 @@ export function Home() {
         </div>
 
         <h2>Needs your attention</h2>
-        {attention.status === "loading" && <EmptyState variant="loading" title="Checking what needs you…" />}
+        {attention.status === "loading" && (
+          <div className="panel" style={{ marginBottom: 13, padding: "16px 17px" }} aria-busy="true">
+            <span className="visually-hidden" role="status">Checking what needs you…</span>
+            <SkeletonLines count={3} widths={["30%", "60%", "45%"]} />
+          </div>
+        )}
         {attention.status === "error" && (
           <div className="panel" style={{ marginBottom: 13 }}>
             <EmptyState
@@ -231,6 +255,31 @@ export function Home() {
           </div>
         )}
 
+        {findings.status === "loading" && (
+          <div className="grid3" aria-busy="true">
+            <span className="visually-hidden" role="status">Loading findings…</span>
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="card" style={{ display: "block" }}>
+                <SkeletonLines count={3} widths={["90%", "50%", "70%"]} />
+              </div>
+            ))}
+          </div>
+        )}
+        {findings.status === "error" && (
+          <div className="panel">
+            <EmptyState
+              variant="error"
+              title="Couldn't load recent findings"
+              description={findings.error}
+              actions={<Button onClick={findings.reload}>Retry</Button>}
+            />
+          </div>
+        )}
+        {findings.status === "success" && (findings.data?.length ?? 0) === 0 && (
+          <div className="panel" style={{ padding: "20px 16px", fontSize: 13.5, color: "var(--muted)" }}>
+            No findings yet. Runs that fail or need a repro will show up here.
+          </div>
+        )}
         {findings.status === "success" && findings.data && findings.data.length > 0 && (
           <div className="grid3">
             {findings.data.slice(0, 3).map((f) => (
@@ -262,7 +311,9 @@ export function Home() {
             </a>
           }
         >
-          {runs.status === "loading" && <EmptyState variant="loading" title="Loading recent runs…" />}
+          {runs.status === "loading" && (
+            <Table columns={runColumns} rows={[]} getRowKey={(r) => r.id} skeletonRows={4} caption="Loading recent runs" />
+          )}
           {runs.status === "error" && (
             <EmptyState
               variant="error"

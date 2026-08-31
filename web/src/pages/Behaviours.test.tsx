@@ -33,10 +33,13 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-test("shows skeleton loading, not a spinner over a blank page", () => {
+test("shows shaped skeleton rows while loading, not a spinner over a blank page", () => {
   vi.mocked(fetch).mockImplementation(() => new Promise(() => {}));
   renderBehaviours();
-  expect(screen.getByText("Loading behaviours…")).toBeInTheDocument();
+  const skeletonRows = document.querySelectorAll("tr[data-skeleton-row]");
+  expect(skeletonRows.length).toBeGreaterThan(0);
+  expect(screen.getByRole("table")).toHaveAttribute("aria-busy", "true");
+  expect(document.querySelector(".tile")).not.toBeInTheDocument();
 });
 
 test("a fresh workspace with no behaviours gets a distinct empty state from a filtered one", async () => {
@@ -85,4 +88,25 @@ test("delete is disabled with an explanation for a role below owner", async () =
   const deleteButton = await screen.findByRole("button", { name: "Delete" });
   expect(deleteButton).toBeDisabled();
   expect(deleteButton).toHaveAttribute("title", "Only an owner can delete a behaviour.");
+});
+
+test("a demo session creating a behaviour is told nothing was saved, not given the real success toast", async () => {
+  const user = userEvent.setup();
+  vi.mocked(fetch).mockImplementation((input, init) => {
+    const url = String(input);
+    if (url.includes("/auth/me")) return jsonResponse(200, { ...ME_OWNER, is_demo: true });
+    if (init?.method === "POST") return jsonResponse(200, { demo: true, persisted: false });
+    return jsonResponse(200, []);
+  });
+  renderBehaviours();
+
+  await screen.findByText("No behaviours yet");
+  // Two "New behaviour" buttons render at once here (the pagehead's and the
+  // empty state's own) -- either opens the same form.
+  await user.click(screen.getAllByRole("button", { name: /New behaviour/ })[0]);
+  await user.type(screen.getByLabelText("Behaviour"), "A customer who retries a slow payment should only be charged once");
+  await user.type(screen.getByLabelText("Route"), "/checkout/payment");
+  await user.click(screen.getByRole("button", { name: "Create behaviour" }));
+
+  expect(await screen.findByText(/Nothing was saved/)).toBeInTheDocument();
 });

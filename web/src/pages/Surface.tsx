@@ -3,10 +3,12 @@ import { Panel } from "../components/Panel";
 import { Pill } from "../components/Pill";
 import { Button } from "../components/Button";
 import { EmptyState } from "../components/EmptyState";
+import { SkeletonBlock, SkeletonLines } from "../components/Skeleton";
 import { useToast } from "../components/Toast";
 import { api } from "../lib/api";
 import { useAsync } from "../lib/useAsync";
 import { useCurrentUser } from "../lib/useCurrentUser";
+import { isDemoWrite, demoWriteMessage } from "../lib/demo";
 import { routes } from "../lib/routes";
 import type { SurfaceSummary } from "../lib/types";
 
@@ -27,8 +29,8 @@ export function Surface() {
 
   async function onRemap() {
     try {
-      await api.post("/surface/remap");
-      show("Re-mapping the repository.");
+      const res = await api.post("/surface/remap");
+      show(isDemoWrite(res) ? demoWriteMessage("the repository would be re-mapped") : "Re-mapping the repository.");
       surface.reload();
     } catch (err) {
       show(err instanceof Error ? err.message : "Couldn't start a re-map.");
@@ -37,10 +39,14 @@ export function Surface() {
 
   async function onWriteMissing() {
     try {
-      const res = await api.post<{ id: string }>("/runs", {
+      const res = await api.post<{ id: string; demo?: boolean; persisted?: boolean }>("/runs", {
         trigger: `Write behaviours for ${uncovered.length} uncovered route${uncovered.length === 1 ? "" : "s"}`,
         routes: uncovered.map((r) => r.path),
       });
+      if (isDemoWrite(res)) {
+        show(demoWriteMessage("behaviours would be written for the missing routes"));
+        return;
+      }
       show("Writing behaviours for the missing routes.");
       if (res.id) navigate(routes.run(res.id));
     } catch (err) {
@@ -51,10 +57,18 @@ export function Surface() {
   if (surface.status === "loading") {
     return (
       <div className="body">
-        <div className="pagehead">
-          <h1>Surface map</h1>
+        <div className="pagehead" aria-busy="true">
+          <span className="visually-hidden" role="status">Loading the surface map…</span>
+          <SkeletonBlock width="35%" height={26} />
         </div>
-        <EmptyState variant="loading" title="Mapping the repository…" />
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 330px", gap: 14, marginTop: 18 }}>
+          <div className="panel" style={{ padding: "16px 17px" }}>
+            <SkeletonLines count={6} />
+          </div>
+          <div className="panel" style={{ padding: "16px 17px" }}>
+            <SkeletonLines count={3} />
+          </div>
+        </div>
       </div>
     );
   }
@@ -106,7 +120,13 @@ export function Surface() {
           </p>
         </div>
         <span className="sp" />
-        <Button size="sm" onClick={onRemap} disabled={!canRemap} title={canRemap ? undefined : "Only an owner or approver can re-map."}>
+        <Button
+          size="sm"
+          onClick={onRemap}
+          disabled={!canRemap}
+          title={canRemap ? undefined : "Only an owner or approver can re-map."}
+          aria-describedby={canRemap ? undefined : "remap-disabled-reason"}
+        >
           Re-map
         </Button>
         <Button
@@ -115,9 +135,12 @@ export function Surface() {
           onClick={onWriteMissing}
           disabled={uncovered.length === 0}
           title={uncovered.length === 0 ? "Every route already has a behaviour." : undefined}
+          aria-describedby={uncovered.length === 0 ? "write-missing-disabled-reason" : undefined}
         >
           Write the {uncovered.length} missing
         </Button>
+        {!canRemap && <span id="remap-disabled-reason" className="visually-hidden">Only an owner or approver can re-map.</span>}
+        {uncovered.length === 0 && <span id="write-missing-disabled-reason" className="visually-hidden">Every route already has a behaviour.</span>}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 330px", gap: 14, marginTop: 18 }}>
         <Panel title="Routes by coverage" headerExtra={<span style={{ fontSize: 13, color: "var(--faint)" }}>Mapped {new Date(data.mapped_at * 1000).toLocaleString()}</span>}>

@@ -1,16 +1,16 @@
 import { useState, type FormEvent } from "react";
 import { Field } from "../../components/Field";
 import { Button } from "../../components/Button";
-import { Pill, type PillKind } from "../../components/Pill";
 import { Icon } from "../../components/Icon";
 import { EmptyState } from "../../components/EmptyState";
+import { SkeletonBlock } from "../../components/Skeleton";
 import { useToast } from "../../components/Toast";
 import { api } from "../../lib/api";
 import { useAsync } from "../../lib/useAsync";
 import type { AsyncState } from "../../lib/useAsync";
+import { isDemoWrite, demoWriteMessage } from "../../lib/demo";
 import type { CurrentUser, Member, Role } from "../../lib/types";
 
-const ROLE_KIND: Record<Role, PillKind> = { owner: "info", approver: "grey", reader: "grey" };
 const ROLE_LABEL: Record<Role, string> = { owner: "Owner", approver: "Approver", reader: "Read only" };
 const ROLES: Role[] = ["owner", "approver", "reader"];
 
@@ -27,8 +27,8 @@ function InviteForm({ onInvited }: { onInvited: () => void }) {
     setError(null);
     setSending(true);
     try {
-      await api.post("/members/invite", { email, role });
-      show(`Invited ${email}.`);
+      const res = await api.post("/members/invite", { email, role });
+      show(isDemoWrite(res) ? demoWriteMessage(`${email} would be invited`) : `Invited ${email}.`);
       setEmail("");
       setOpen(false);
       onInvited();
@@ -79,8 +79,8 @@ export function MembersPane({ user }: { user: AsyncState<CurrentUser> }) {
 
   async function changeRole(m: Member, role: Role) {
     try {
-      await api.patch(`/members/${m.id}`, { role });
-      show(`${m.name}'s role changed to ${ROLE_LABEL[role]}.`);
+      const res = await api.patch(`/members/${m.id}`, { role });
+      show(isDemoWrite(res) ? demoWriteMessage(`${m.name}'s role would change to ${ROLE_LABEL[role]}`) : `${m.name}'s role changed to ${ROLE_LABEL[role]}.`);
       members.reload();
     } catch (err) {
       show(err instanceof Error ? err.message : "Couldn't change that role.");
@@ -89,8 +89,8 @@ export function MembersPane({ user }: { user: AsyncState<CurrentUser> }) {
 
   async function remove(m: Member) {
     try {
-      await api.del(`/members/${m.id}`);
-      show(`${m.name} removed.`);
+      const res = await api.del(`/members/${m.id}`);
+      show(isDemoWrite(res) ? demoWriteMessage(`${m.name} would be removed`) : `${m.name} removed.`);
       members.reload();
     } catch (err) {
       show(err instanceof Error ? err.message : "Couldn't remove that member.");
@@ -107,7 +107,23 @@ export function MembersPane({ user }: { user: AsyncState<CurrentUser> }) {
         <InviteForm onInvited={members.reload} />
       </div>
 
-      {members.status === "loading" && <EmptyState variant="loading" title="Loading members…" />}
+      {members.status === "loading" && (
+        <div className="panel" aria-busy="true">
+          <span className="visually-hidden" role="status">Loading members…</span>
+          <table>
+            <tbody>
+              {[0, 1, 2].map((i) => (
+                <tr key={i} data-skeleton-row="">
+                  <td><SkeletonBlock width="55%" /></td>
+                  <td style={{ width: 150 }}><SkeletonBlock width="70%" /></td>
+                  <td style={{ width: 150 }}><SkeletonBlock width="60%" /></td>
+                  <td style={{ width: 90 }}><SkeletonBlock width={60} height={26} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
       {members.status === "error" && (
         <EmptyState variant="error" title="Couldn't load members" description={members.error} actions={<Button onClick={members.reload}>Retry</Button>} />
       )}
@@ -128,11 +144,22 @@ export function MembersPane({ user }: { user: AsyncState<CurrentUser> }) {
             <tbody>
               {rows.map((m) => {
                 const isSelf = m.user_id === user.data?.id;
-                const disabledReason = !canManage
-                  ? "Only an owner can change roles or remove members."
+                // Two DISTINCT reasons, one per control -- a shared reason
+                // string previously let "You cannot change your own role"
+                // show up on the Remove button for a self row, which is
+                // simply the wrong explanation for that control.
+                const roleDisabledReason = !canManage
+                  ? "Only an owner can change roles."
                   : isSelf
                     ? "You cannot change your own role."
                     : undefined;
+                const removeDisabledReason = !canManage
+                  ? "Only an owner can remove a member."
+                  : isSelf
+                    ? "You cannot remove yourself."
+                    : undefined;
+                const roleHintId = `role-reason-${m.id}`;
+                const removeHintId = `remove-reason-${m.id}`;
                 return (
                   <tr key={m.id}>
                     <td>
@@ -145,26 +172,42 @@ export function MembersPane({ user }: { user: AsyncState<CurrentUser> }) {
                       </span>
                     </td>
                     <td>
-                      {disabledReason ? (
-                        <Pill kind={ROLE_KIND[m.role]}>{ROLE_LABEL[m.role]}</Pill>
-                      ) : (
-                        <select
-                          aria-label={`Role for ${m.name}`}
-                          value={m.role}
-                          onChange={(e) => changeRole(m, e.target.value as Role)}
-                          style={{ padding: "5px 8px", border: "1px solid var(--line)", borderRadius: 6 }}
-                        >
-                          {ROLES.map((r) => (
-                            <option key={r} value={r}>{ROLE_LABEL[r]}</option>
-                          ))}
-                        </select>
+                      {/* Always a real, operable control -- disabled and
+                          explained rather than swapped out for a static
+                          pill, so the permission model stays visible and
+                          keyboard-reachable even when it can't be used. */}
+                      <select
+                        aria-label={`Role for ${m.name}`}
+                        value={m.role}
+                        onChange={(e) => changeRole(m, e.target.value as Role)}
+                        disabled={Boolean(roleDisabledReason)}
+                        title={roleDisabledReason}
+                        aria-describedby={roleDisabledReason ? roleHintId : undefined}
+                        style={{ padding: "5px 8px", border: "1px solid var(--line)", borderRadius: 6 }}
+                      >
+                        {ROLES.map((r) => (
+                          <option key={r} value={r}>{ROLE_LABEL[r]}</option>
+                        ))}
+                      </select>
+                      {roleDisabledReason && (
+                        <span id={roleHintId} className="visually-hidden">{roleDisabledReason}</span>
                       )}
                     </td>
                     <td style={{ color: "var(--muted)" }}>{m.last_active ? new Date(m.last_active * 1000).toLocaleDateString() : "—"}</td>
                     <td>
-                      <Button size="sm" variant="dang" onClick={() => remove(m)} disabled={Boolean(disabledReason)} title={disabledReason}>
+                      <Button
+                        size="sm"
+                        variant="dang"
+                        onClick={() => remove(m)}
+                        disabled={Boolean(removeDisabledReason)}
+                        title={removeDisabledReason}
+                        aria-describedby={removeDisabledReason ? removeHintId : undefined}
+                      >
                         Remove
                       </Button>
+                      {removeDisabledReason && (
+                        <span id={removeHintId} className="visually-hidden">{removeDisabledReason}</span>
+                      )}
                     </td>
                   </tr>
                 );
