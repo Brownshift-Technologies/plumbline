@@ -53,12 +53,16 @@ import json
 import os
 import pathlib
 import re
+from urllib.parse import urljoin
 import shutil
 import signal
 import subprocess
 import tempfile
 import uuid
 from typing import Protocol
+
+
+_ABSOLUTE_URL = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*:")
 
 
 class BrowserDriver(Protocol):
@@ -812,6 +816,7 @@ class PlaywrightDriver:
 
     def __init__(self, cwd: "pathlib.Path | None" = None, spec_timeout_s: float = DEFAULT_SPEC_SUBPROCESS_TIMEOUT_S):
         self._pw = self._browser = self._page = self._last_response = None
+        self._base_url = ""
         self._cwd = cwd
         self._spec_timeout_s = spec_timeout_s
 
@@ -862,7 +867,40 @@ class PlaywrightDriver:
         # version did) specifically so headers()/cookies() below have
         # something to read -- Auditor's entire mandate lives in this
         # object and nowhere else `PlaywrightDriver` touches.
-        self._last_response = self._page.goto(url, wait_until="domcontentloaded")
+        self._last_response = self._page.goto(
+            self._absolute(url), wait_until="domcontentloaded"
+        )
+
+    def _absolute(self, url: str) -> str:
+        """Resolve a route path against the site already being visited.
+
+        Agents navigate by ROUTE PATH -- `agents/auditor.py` walks
+        `Route.path` values straight from the graph and calls
+        `ctx.browser.goto("/")`. Playwright has no base URL of its own, so
+        that reached `Page.goto("/")` and raised `Protocol error
+        (Page.navigate): Cannot navigate to invalid URL`. Auditor died on
+        its first route of every real run.
+
+        The base is remembered from the last absolute navigation, which
+        `job/worker.py` always performs first (it navigates the fresh
+        driver to the workspace's `target_url` before handing it to any
+        agent). Falling back to the page's current URL covers a driver
+        someone navigated by hand.
+        """
+        if _ABSOLUTE_URL.match(url):
+            self._base_url = url
+            return url
+        base = self._base_url or ""
+        if not base:
+            current = getattr(self._page, "url", "") or ""
+            if current.startswith(("http://", "https://")):
+                base = current
+        if not base:
+            raise ValueError(
+                f"cannot resolve the relative URL {url!r}: no absolute page has been "
+                "visited yet, so there is no origin to resolve it against"
+            )
+        return urljoin(base, url)
 
     def snapshot(self) -> dict:
         return {"title": self._page.title(), "url": self._page.url}

@@ -459,3 +459,50 @@ def test_two_real_concurrent_claims_for_the_same_run_only_one_wins():
     assert b_result[0] is not None and b_result[0].state == "running"  # B won
     assert a_result is None  # A's retry saw B's claim and correctly lost
     assert r_a.workspace("ws1").runs_used == 1  # billed exactly once, not twice
+
+
+def test_route_elements_round_trip_without_a_nested_array(repo):
+    """Firestore rejects an array inside an array.
+
+    `Route.elements` is a tuple of `(ref, role, name)` triples, so writing
+    it straight through failed the whole document with a bare
+    `InvalidArgument`. Cartographer's `graph.write` errored on every real
+    run because of it, and nothing caught it: `seed/demo.py` never writes
+    `elements`, so the demo path -- the only path anyone exercised -- never
+    touched this field.
+    """
+    from app.models import Route
+
+    repo.put_route(Route(
+        id="rt1", workspace_id="ws1", path="/checkout", coverage_pct=0,
+        elements=(("e1", "button", "Pay"), ("e2", "link", "Cart")),
+    ))
+
+    stored = repo._store.get("routes", "rt1")
+    assert all(isinstance(e, dict) for e in stored["elements"]), (
+        "elements must be stored as maps; a list of lists is a nested array "
+        "and Firestore refuses the document"
+    )
+
+    back = repo.routes_for_workspace("ws1")[0]
+    assert back.elements == (("e1", "button", "Pay"), ("e2", "link", "Cart"))
+    hash(back)  # Route is frozen and must stay hashable
+
+
+def test_a_route_stored_as_lists_still_reads_back(repo):
+    """Tolerates the pre-fix shape rather than needing a migration."""
+    from app.models import Route
+
+    repo.put_route(Route(id="rt2", workspace_id="ws1", path="/x", coverage_pct=0))
+    repo._store.put("routes", "rt2", {
+        "id": "rt2", "workspace_id": "ws1", "path": "/x", "coverage_pct": 0,
+        "last_mapped": 0.0, "elements": [["e1", "button", "Pay"]],
+    })
+    assert repo.routes_for_workspace("ws1")[0].elements == (("e1", "button", "Pay"),)
+
+
+def test_a_route_with_no_elements_is_still_fine(repo):
+    from app.models import Route
+
+    repo.put_route(Route(id="rt3", workspace_id="ws1", path="/y", coverage_pct=0))
+    assert repo.routes_for_workspace("ws1")[0].elements == ()

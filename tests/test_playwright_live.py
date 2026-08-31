@@ -126,3 +126,29 @@ def test_cookies_reflects_a_real_set_cookie_response_header(driver):
 
 def test_headers_is_empty_before_any_goto(driver):
     assert driver.headers() == {}
+
+
+def test_a_route_path_resolves_against_the_site_already_being_visited(driver):
+    """Agents navigate by route path, not by absolute URL.
+
+    `agents/auditor.py` walks `Route.path` values out of the graph and
+    calls `ctx.browser.goto("/")`. Playwright has no base URL of its own,
+    so that raised `Protocol error (Page.navigate): Cannot navigate to
+    invalid URL` and Auditor died on the first route of every real run --
+    invisible here until this suite was pointed at a real origin.
+    """
+    driver._page.route("**/*", lambda route: route.fulfill(
+        status=200, body="<html><title>ok</title></html>",
+    ))
+    driver.goto("https://example.test/start")
+    driver.goto("/cart")
+    assert driver.snapshot()["url"] == "https://example.test/cart"
+
+    driver.goto("checkout")  # relative, no leading slash
+    assert driver.snapshot()["url"] == "https://example.test/checkout"
+
+
+def test_a_relative_goto_before_any_absolute_one_fails_loudly(driver):
+    """Rather than silently navigating somewhere unintended."""
+    with pytest.raises(ValueError, match="no absolute page has been visited"):
+        driver.goto("/cart")

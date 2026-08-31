@@ -131,17 +131,75 @@ class FakeJobsClient:
         )
 
 
-def test_enqueue_job_targets_the_right_job_and_passes_args():
+def test_enqueue_job_targets_the_right_job():
     client = FakeJobsClient()
     config = load_config(prefix="a11y")
     operation_name = enqueue_job(config, "a11y-worker", {"run_id": "r1"}, client=client)
-    request = client.requests[0]
-    assert request["name"] == (
+    assert client.requests[0]["name"] == (
         "projects/total-fiber-399801/locations/us-central1/jobs/a11y-worker"
     )
-    overrides = request["overrides"]["container_overrides"][0]
-    assert overrides["args"] == ['{"run_id": "r1"}']
     assert operation_name == OPERATION_NAME
+
+
+def test_enqueue_job_passes_values_as_env_not_args():
+    """The contract that makes a real run work at all.
+
+    This test used to assert `overrides["args"] == ['{"run_id": "r1"}']`,
+    and it passed for the entire build while the real-run path had never
+    once succeeded in deployment. Two things were wrong with args:
+
+    1. `job/worker.py` reads `PLUMBLINE_RUN_ID` from `os.environ`. Nothing
+       in this codebase has ever read argv.
+    2. `Dockerfile.worker` sets CMD with no ENTRYPOINT, so an args override
+       REPLACES the command rather than appending to it. Cloud Run tried to
+       exec the JSON blob as a program and logged "Application exec likely
+       failed" -- while the run sat in `queued` forever, with no step, no
+       error, and nothing visible in the UI.
+    """
+    client = FakeJobsClient()
+    config = load_config(prefix="a11y")
+    enqueue_job(config, "a11y-worker", {"PLUMBLINE_RUN_ID": "r1"}, client=client)
+
+    overrides = client.requests[0]["overrides"]["container_overrides"][0]
+    assert "args" not in overrides, (
+        "args REPLACES the image CMD when there is no ENTRYPOINT -- the "
+        "container will try to exec this value as a program"
+    )
+    assert overrides["env"] == [{"name": "PLUMBLINE_RUN_ID", "value": "r1"}]
+
+
+def test_enqueue_job_stringifies_env_values():
+    """The Cloud Run API rejects a non-string env value rather than coercing
+    it, so a plain int would fail at call time, in production, only."""
+    client = FakeJobsClient()
+    config = load_config(prefix="a11y")
+    enqueue_job(config, "a11y-worker", {"ATTEMPT": 2, "DEBUG": True}, client=client)
+
+    env = client.requests[0]["overrides"]["container_overrides"][0]["env"]
+    assert env == [
+        {"name": "ATTEMPT", "value": "2"},
+        {"name": "DEBUG", "value": "True"},
+    ]
+    assert all(isinstance(e["value"], str) for e in env)
+
+
+def test_the_env_name_enqueue_sends_is_the_one_the_worker_reads():
+    """Pins the two halves together by name.
+
+    The bug was a seam: the enqueuer and the worker each looked correct on
+    their own and simply did not agree on how the run id travelled. Read the
+    name out of job/worker.py's source rather than restating it here, so
+    renaming it in one place fails here instead of in production.
+    """
+    import pathlib as _pathlib
+    import re
+
+    source = _pathlib.Path(__file__).resolve().parents[1] / "job" / "worker.py"
+    names = set(re.findall(r'os\.environ\.get\(\s*"([A-Z_]+)"', source.read_text()))
+    assert "PLUMBLINE_RUN_ID" in names, (
+        "job/worker.py no longer reads PLUMBLINE_RUN_ID from the environment; "
+        "core/events.py's enqueue_job still sends it under that name"
+    )
 
 
 def test_run_job_returns_an_operation_whose_operation_is_a_property():

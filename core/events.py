@@ -92,7 +92,27 @@ def enqueue_job(config: Config, job_name: str, args: dict, client=None) -> str:
         "name": (
             f"projects/{config.project_id}/locations/{config.location}/jobs/{job_name}"
         ),
-        "overrides": {"container_overrides": [{"args": [json.dumps(args)]}]},
+        # ENV overrides, not ARGS. This passed `args: [json.dumps(args)]`
+        # and it broke the real-run path completely, in two compounding
+        # ways:
+        #
+        # 1. `job/worker.py` reads `PLUMBLINE_RUN_ID` from the ENVIRONMENT
+        #    (`os.environ.get("PLUMBLINE_RUN_ID")`). A JSON blob in argv is
+        #    something nothing in this codebase ever reads.
+        # 2. `Dockerfile.worker` sets `CMD` and no `ENTRYPOINT`, so an
+        #    `args` override does not append to the command -- it REPLACES
+        #    it. Cloud Run tried to exec `{"PLUMBLINE_RUN_ID": "run_..."}`
+        #    as a program, logged "Application exec likely failed", and the
+        #    run sat in `queued` forever with no step and no error anyone
+        #    would ever see in the UI.
+        #
+        # Every value is stringified because the Cloud Run API rejects a
+        # non-string env value outright rather than coercing it.
+        "overrides": {
+            "container_overrides": [
+                {"env": [{"name": k, "value": str(v)} for k, v in args.items()]}
+            ]
+        },
     }
     lro = client.run_job(request=request)
     return lro.operation.name

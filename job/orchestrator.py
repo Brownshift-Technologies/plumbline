@@ -193,6 +193,8 @@ Judgement calls this module makes about what a real worker meets
 import time
 import uuid
 
+from core.guards import redact_deep
+from core.telemetry import log_event
 from agents.auditor import Auditor
 from agents.author import Author
 from agents.base import AgentContext, AgentResult
@@ -428,6 +430,27 @@ class Orchestrator:
                 raise _HaltRun("finished") from None
             return None
         except Exception as exc:
+            # `Step.detail` stays the exception TYPE only. An exception
+            # message is untrusted text straight from whatever failed and
+            # can carry a token or a customer's PII, `redact_deep` only
+            # catches the shapes it knows, and this string is rendered in
+            # the UI and kept in the ledger. Type-only is the one form
+            # that cannot leak.
+            #
+            # The message goes to the structured log instead, which is
+            # operator-only. That split matters: on its own the type name
+            # is true and useless -- Playwright's exception class is
+            # literally `Error`, Firestore's is `InvalidArgument` -- and
+            # two real bugs here (a relative `goto` Playwright cannot
+            # resolve, and a nested array Firestore refuses) each cost a
+            # diagnostic round that the message would have answered on
+            # sight.
+            log_event(
+                "orchestrator.agent_error", severity="ERROR",
+                agent=agent.name, run_id=run.id,
+                error_type=type(exc).__name__,
+                detail=redact_deep(f"{exc}")[:2000],
+            )
             self._write_step(
                 run, agent.name, f"{agent.name} raised an unexpected error",
                 type(exc).__name__, "error", started,

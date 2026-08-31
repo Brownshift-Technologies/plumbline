@@ -169,6 +169,15 @@ SERVICE_URL="$(gcloud run services describe "${API_SERVICE}" \
   --project="${PROJECT}" --region="${REGION}" --format='value(status.url)')"
 
 # --- 8. Deploy the run worker as a Cloud Run Job -----------------------------
+# --cpu=2 --memory=4Gi: this container carries Chromium and Node, and
+#   `agents/browser.py` launches a real browser inside it. At the original
+#   1 CPU / 1Gi it never got as far as printing anything: Cloud Run logged
+#   "Application failed to start: The container may have exited abnormally"
+#   with no container output at all, and every real run sat in `queued`
+#   forever while the execution quietly failed. Chromium alone wants more
+#   than a gigabyte before it has rendered a page. The job is short-lived
+#   and billed per execution second, so a bigger shape for a few minutes
+#   costs less than a small one that fails and retries.
 # --tasks=1: one task per execution -- nothing about a Plumbline run is
 #   parallelisable across tasks.
 # --max-retries=1 --task-timeout=900s: bounds both how many times and how
@@ -180,7 +189,7 @@ SERVICE_URL="$(gcloud run services describe "${API_SERVICE}" \
 gcloud run jobs deploy "${JOB_NAME}" \
   --project="${PROJECT}" --region="${REGION}" \
   --image="${WORKER_IMAGE}" \
-  --cpu=1 --memory=1Gi \
+  --cpu=2 --memory=4Gi \
   --tasks=1 --max-retries=1 --task-timeout=900s \
   --set-env-vars="PLUMBLINE_ENV=production,GCP_PROJECT=${PROJECT},GCP_LOCATION=${REGION},GCP_VERTEX_LOCATION=${GEMINI_LOCATION},GEMINI_MODEL=${GEMINI_MODEL}" \
   --set-secrets="OAUTH_STATE_SECRET=${SECRET_NAME}:latest"

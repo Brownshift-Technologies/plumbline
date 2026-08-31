@@ -71,6 +71,27 @@ def _coerce_tuples(cls, data: dict) -> dict:
     return coerced
 
 
+def _elements_to_triples(raw) -> tuple[tuple[str, str, str], ...]:
+    """Read `Route.elements` back as triples, whichever shape it was stored in.
+
+    `Repo.put_route` writes a list of maps because Firestore forbids nested
+    arrays. Rows written before that, and anything a fake store round-trips
+    verbatim, hold lists of three strings instead, so both are accepted --
+    the alternative is a migration for a field whose only writer is a crawl
+    that rebuilds it from scratch on the next run anyway.
+    """
+    if not raw:
+        return ()
+    out = []
+    for e in raw:
+        if isinstance(e, dict):
+            out.append((e.get("ref", ""), e.get("role", ""), e.get("name", "")))
+        else:
+            ref, role, name = (list(e) + ["", "", ""])[:3]
+            out.append((ref, role, name))
+    return tuple(out)
+
+
 def _rebuild(cls, data):
     return cls(**_coerce_tuples(cls, data)) if data else None
 
@@ -420,10 +441,29 @@ class Repo:
 
     # surface -----------------------------------------------------------
     def put_route(self, r: Route) -> None:
-        self._store.put("routes", r.id, to_dict(r))
+        # `Route.elements` is a tuple of `(ref, role, name)` triples, and
+        # Firestore rejects a nested array outright: an array may not
+        # contain another array. Written as-is it fails the whole document
+        # with a bare `InvalidArgument`, which is exactly what happened --
+        # Cartographer's `graph.write` errored on every real run, while the
+        # demo path stayed green because `seed/demo.py` never writes
+        # `elements` at all, so no fixture ever exercised this field.
+        #
+        # Stored as a list of maps, which Firestore does allow, and turned
+        # back into triples on read. The in-memory shape is unchanged, so
+        # `Route` stays hashable and Author's
+        # `for _, role, name in route.elements` keeps working.
+        data = to_dict(r)
+        data["elements"] = [
+            {"ref": ref, "role": role, "name": name} for ref, role, name in r.elements
+        ]
+        self._store.put("routes", r.id, data)
 
     def routes_for_workspace(self, wid: str) -> list[Route]:
-        rows = [Route(**r) for r in self._store.query("routes", "workspace_id", "==", wid)]
+        rows = [
+            Route(**{**raw, "elements": _elements_to_triples(raw.get("elements"))})
+            for raw in self._store.query("routes", "workspace_id", "==", wid)
+        ]
         return sorted(rows, key=lambda r: r.coverage_pct)
 
     def put_behaviour(self, b: Behaviour) -> None:
