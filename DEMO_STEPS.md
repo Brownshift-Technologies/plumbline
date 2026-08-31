@@ -4,9 +4,9 @@
 
 | Requirement | Where it happens |
 |---|---|
-| Short overview of the problem | B1, the first three paragraphs |
+| Short overview of the problem | B1, the sign-in page, first four paragraphs |
 | Value proposition | B1, "an agent that can write a test can write any file" |
-| Demo of the app in action | B2 to B5, run 4471 and the ledger |
+| Demo of the app in action | B1a to B5, the demo door, run 4471, the ledger |
 | **Backend running on Google Cloud** | **B6, three pages, about twenty-five seconds** |
 
 The last one is pass/fail. A submission without visible Google Cloud evidence
@@ -40,10 +40,15 @@ to start the container again, which takes about fifteen seconds against two
 when it is warm. Skip this and that fifteen seconds happens on camera and looks
 like the app is broken.
 
-## A2. Open the demo and leave it open
+## A2. Open the demo once, then sign out again
 
-Click **Open the live demo** once, before recording. Your sandbox persists, so
-a second take starts exactly where the first one left off.
+Click **Open the live demo** once before recording, let Home load, then sign
+out so you are back on the sign-in page when you start.
+
+**Why:** the first demo entry seeds a sandbox and takes a couple of seconds
+longer than the rest. Doing it once beforehand means the click the judges watch
+is the fast one. Your sandbox persists, so signing out and back in returns you
+to the same workspace.
 
 **You should see:** a blue banner reading *This is your own live sandbox*, and
 in the left rail `Runs 18`, `Findings 6`, `Behaviours 99+`, `Agents 11`.
@@ -102,14 +107,32 @@ Close Slack, mail, and anything that shows notifications.
 
 # Part B, during the take
 
-## B1. The opening, on the app's Home screen
+## B1. The opening, on the sign-in page
 
-Start with tab 1 on Home and just speak. Nothing to click for the first five
-paragraphs, through *"one gate everything they do passes through."*
+Start with tab 1 showing **/signin**. Nothing to click through the first five
+paragraphs, ending at *"one gate that everything they do has to pass through."*
 
-**Why not slides:** the Home screen already carries the numbers you are
-implicitly claiming, and a live product on screen from the first second is a
-stronger opening than a title card.
+**You should see:** the headline *The test suite you never had time to write*,
+the three sign-in buttons, the email form, and the **Open the live demo** panel.
+
+**Why start here:** it is the page a judge lands on, and the whole opening is
+about a bug nobody wrote a test for. Talking over the sign-in screen keeps the
+first forty seconds on the problem instead of on a dashboard they cannot read
+yet.
+
+## B1a. When you say *"Anyone can try it. No account, no card."*
+
+Click **Open the live demo**.
+
+**You should see:** Home, with the blue sandbox banner, and in the left rail
+`Runs 18`, `Findings 6`, `Behaviours 99+`, `Agents 11`.
+
+**Do NOT click the GitHub, Google or Okta buttons.** They are wired to the
+sign-in flow but no OAuth credentials are configured on this deployment, so
+they redirect with an empty `client_id` and land on a provider error page.
+Gesture at them while you say the sign-in line and move on. If you want them to
+be clickable on camera, register the OAuth apps first and set the client id and
+secret; otherwise say the line and click the demo button instead.
 
 ## B2. When you say *"Here is a run..."*
 
@@ -219,6 +242,14 @@ connection has no user interface yet. Say that rather than implying otherwise.
 Author, Healer and Surgeon skip with an explanatory step when no repository is
 connected. That is designed behaviour, not a crash: every agent either runs or
 says why it did not.
+
+## The OAuth buttons go to an error page
+
+Expected, on this deployment. `GITHUB_APP_ID`, the Google client id and the
+Okta client id are all unset, so `/api/auth/oauth/<provider>/start` redirects
+with an empty `client_id` and a relative `redirect_uri`, which every provider
+rejects. Email sign-in and the demo door both work. Do not click the three
+buttons on camera.
 
 ## Never fake a run
 
