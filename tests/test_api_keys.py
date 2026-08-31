@@ -132,4 +132,8 @@ def test_a_429_carries_retry_after(client):
 def test_a_demo_session_cannot_create_a_key(client_demo):
     resp = client_demo.post("/api/keys", json={"name": "x", "role": "owner"})
     assert resp.status_code == 200
-    assert resp.json() == {"demo": True, "persisted": False}
+    body = resp.json()
+    # Still refused -- see this task's report's "must stay refused" list --
+    # but with a reason, not the old bare "nothing was saved".
+    assert body["demo"] is True and body["persisted"] is False
+    assert body["reason"]

@@ -159,7 +159,7 @@ export function RunDetail() {
         `/findings/${findingId}/patch/approve`,
       );
       if (isDemoWrite(res)) {
-        show(demoWriteMessage("this is where the pull request would merge"));
+        show(demoWriteMessage(res, "this is where the pull request would merge"));
       } else {
         show(res.already_approved ? "Already approved." : "Patch approved. Merging the pull request.");
       }
@@ -176,7 +176,7 @@ export function RunDetail() {
     setActionError(null);
     try {
       const res = await api.post(`/findings/${findingId}/patch/reject`, { note: rejectNote.trim() });
-      show(isDemoWrite(res) ? demoWriteMessage("this patch would be rejected") : "Patch rejected. The finding stays open.");
+      show(isDemoWrite(res) ? demoWriteMessage(res, "this patch would be rejected") : "Patch rejected. The finding stays open.");
       setRejectOpen(false);
       setRejectNote("");
       patchQuery.reload();
@@ -190,7 +190,7 @@ export function RunDetail() {
     setActionError(null);
     try {
       const res = await api.post(`/findings/${findingId}/patch/changes`, { note: changesNote.trim() || undefined });
-      show(isDemoWrite(res) ? demoWriteMessage("changes would be requested from Surgeon") : "Requested changes. Surgeon will try again.");
+      show(isDemoWrite(res) ? demoWriteMessage(res, "changes would be requested from Surgeon") : "Requested changes. Surgeon will try again.");
       setChangesOpen(false);
       setChangesNote("");
       patchQuery.reload();
@@ -203,7 +203,7 @@ export function RunDetail() {
     if (!run) return;
     try {
       const res = await api.post(`/runs/${run.id}/cancel`);
-      show(isDemoWrite(res) ? demoWriteMessage("this run would be cancelled") : "Run cancelled.");
+      show(isDemoWrite(res) ? demoWriteMessage(res, "this run would be cancelled") : "Run cancelled.");
       runQuery.reload();
     } catch (err) {
       show(err instanceof Error ? err.message : "Couldn't cancel this run.");
@@ -263,6 +263,11 @@ export function RunDetail() {
             <p className="n" style={{ marginTop: 4, fontSize: 13.5, color: "var(--muted)" }}>
               {behaviourSummary(run)}
             </p>
+            {user?.is_demo && (
+              <p style={{ marginTop: 4, fontSize: 13, color: "var(--muted)" }}>
+                Replayed from the demo's seeded fixture, not a real browser run against a live app.
+              </p>
+            )}
           </div>
           <span className="sp" />
           <Button>Replay deterministically</Button>

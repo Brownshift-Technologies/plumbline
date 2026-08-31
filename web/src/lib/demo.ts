@@ -1,16 +1,26 @@
 /**
- * Every write-capable route answers a demo session with
- * `{"demo": true, "persisted": false}` (see `app/deps.py`) instead of
- * performing the write. A screen that shows the same success toast a real
- * session gets is lying at the exact moment the product's stakes are
- * highest -- an approved payments patch that was never actually approved.
+ * A demo session gets its own real, writable sandbox workspace now --
+ * behaviours, the gated patch, gate rules, pausing the fleet, a simulated
+ * run, and more all genuinely persist there, and the normal success toast
+ * is the honest thing to show for them.
  *
- * Every mutation handler in the app must check this before announcing
- * success, and say what *would* have happened instead.
+ * A SMALL remaining set of routes still refuses: anything that would
+ * reach outside that sandbox -- a real GitHub repository, a real
+ * environment, outbound webhook delivery, an API key or account setting
+ * that would work past the demo, billing. Those still answer
+ * `{"demo": true, "persisted": false, "reason": "..."}` (see
+ * `app/deps.py`'s `demo_refusal`), and `reason` is a full sentence saying
+ * WHY -- not just "nothing was saved", which would read as a lie the
+ * moment most other actions in the same demo genuinely work.
+ *
+ * Every mutation handler in the app must still check this before
+ * announcing success: `isDemoWrite` only ever fires on that small
+ * remaining refused set now, not on every write.
  */
 export interface DemoWriteResponse {
   demo?: boolean;
   persisted?: boolean;
+  reason?: string;
 }
 
 /**
@@ -28,7 +38,15 @@ export function isDemoWrite(res: unknown): boolean {
   return Boolean(res && typeof res === "object" && (res as DemoWriteResponse).demo === true);
 }
 
-/** Builds the "nothing was saved" toast, naming the specific action that didn't happen. */
-export function demoWriteMessage(whatWouldHaveHappened: string): string {
-  return `In the demo, ${whatWouldHaveHappened}. Nothing was saved.`;
+/**
+ * The refusal toast for the small set of actions that still reach outside
+ * the demo sandbox. Prefers the backend's own `reason` (a full sentence
+ * saying WHY this one specific action isn't available) when the response
+ * carries one -- every route `app/deps.py`'s `demo_refusal` covers does --
+ * falling back to the old generic wording only for a response that
+ * predates it.
+ */
+export function demoWriteMessage(res: unknown, whatWouldHaveHappened: string): string {
+  const reason = res && typeof res === "object" ? (res as DemoWriteResponse).reason : undefined;
+  return reason ?? `In the demo, ${whatWouldHaveHappened}. Nothing was saved.`;
 }

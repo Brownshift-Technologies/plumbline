@@ -133,6 +133,14 @@ class Workspace:
     installation_id: str = ""
     repo_full_name: str = ""
     default_branch: str = "main"
+    # A per-session demo sandbox's own timestamp, read by `seed/demo.py`'s
+    # cleanup sweep (`app/main.py`'s `_sweep_expired_demo_workspaces_
+    # factory`) to find workspaces whose 2-hour `DEMO_TTL_SECONDS` window
+    # has passed -- there is no other field on this row that says when it
+    # was created. Every non-demo `Workspace` gets one too (a plain field
+    # default, not a demo-only one) rather than adding a second dataclass
+    # shape just for demo rows; nothing outside the sweep reads it yet.
+    created_at: float = field(default_factory=time.time)
 
 
 @dataclass(frozen=True)

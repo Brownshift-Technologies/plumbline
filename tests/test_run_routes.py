@@ -96,11 +96,27 @@ def test_a_reader_cannot_create_a_run(client_as_reader):
     assert r.status_code == 403
 
 
-def test_a_demo_session_creating_a_run_persists_nothing(client_demo, stub_enqueue):
+def test_a_demo_session_creating_a_run_simulates_it_in_its_own_sandbox(client_demo, stub_enqueue):
+    # A demo session's "start a run" is a SIMULATED run now (see
+    # app/run_routes.py's simulate_run) -- a real Run/Step trail written
+    # to its own sandbox, never `app.state.enqueue_job` (there is no real
+    # app for a demo sandbox to drive a browser against).
     r = client_demo.post("/api/runs", json={"trigger": "manual"})
-    assert r.status_code == 200
-    assert r.json() == {"demo": True, "persisted": False}
+    assert r.status_code == 202
+    body = r.json()
+    assert body["id"] and "demo" not in body
     assert stub_enqueue == []
+
+    for _ in range(200):
+        detail = client_demo.get(f"/api/runs/{body['id']}").json()
+        if detail["run"]["state"] == "finished":
+            break
+        time.sleep(0.01)
+    else:
+        raise AssertionError("simulated demo run never reached a terminal state")
+
+    assert len(detail["steps"]) == 7
+    assert detail["finding_id"]
 
 
 # --- listing --------------------------------------------------------------

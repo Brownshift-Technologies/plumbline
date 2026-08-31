@@ -168,8 +168,12 @@ def invite_member(
     body: InviteBody, request: Request, sess=Depends(current_session),
     _role=Depends(require_write_role("owner")),
 ):
-    if sess.is_demo:
-        return {"demo": True, "persisted": False}
+    # A real write in a demo session's own sandbox too -- creates a
+    # Membership (and, for a brand-new email, a User) row scoped to
+    # `sess.workspace_id`. It never sends anything: this codebase has no
+    # invite-email delivery for ANY session, demo or not (see the module
+    # docstring's "Inviting an email with no existing account" section),
+    # so there is nothing here that reaches outside the sandbox to refuse.
     if body.role not in _VALID_ROLES:
         raise HTTPException(400, f"role must be one of {_VALID_ROLES}")
 
@@ -213,8 +217,6 @@ def change_role(
     membership_id: str, body: RoleBody, request: Request, sess=Depends(current_session),
     _role=Depends(require_write_role("owner")),
 ):
-    if sess.is_demo:
-        return {"demo": True, "persisted": False}
     if body.role not in _VALID_ROLES:
         raise HTTPException(400, f"role must be one of {_VALID_ROLES}")
 
@@ -244,9 +246,6 @@ def remove_member(
     membership_id: str, request: Request, sess=Depends(current_session),
     _role=Depends(require_write_role("owner")),
 ):
-    if sess.is_demo:
-        return {"demo": True, "persisted": False}
-
     repo = request.app.state.repo
     membership = _get_membership_or_404(repo, sess.workspace_id, membership_id)
 

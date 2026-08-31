@@ -46,7 +46,7 @@ import pyotp
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, EmailStr
 
-from app.deps import current_session
+from app.deps import current_session, demo_refusal
 from app.models import PasswordReset
 from app.security import hash_password, hash_token, new_token, new_totp_secret, totp_step_for
 
@@ -83,8 +83,11 @@ class ResetConfirm(BaseModel):
 
 @router.post("/totp/enrol")
 def totp_enrol(request: Request, sess=Depends(current_session)):
+    # A demo session's user_id ("demo") has no User row at all -- see
+    # app/deps.py's current_user docstring -- so there is no account here
+    # to attach a TOTP secret to, sandbox or not.
     if sess.is_demo:
-        return {"demo": True, "persisted": False}
+        return demo_refusal("Demo sessions don't have a real account to enrol two-factor authentication on.")
     repo = request.app.state.repo
     user = repo.user(sess.user_id)
     if not user:
@@ -101,7 +104,7 @@ def totp_enrol(request: Request, sess=Depends(current_session)):
 @router.post("/totp/verify")
 def totp_verify(body: TotpVerify, request: Request, sess=Depends(current_session)):
     if sess.is_demo:
-        return {"demo": True, "persisted": False}
+        return demo_refusal("Demo sessions don't have a real account to confirm two-factor authentication on.")
     repo = request.app.state.repo
     user = repo.user(sess.user_id)
     if not user:
@@ -122,7 +125,7 @@ def totp_verify(body: TotpVerify, request: Request, sess=Depends(current_session
 @router.delete("/totp")
 def totp_remove(body: TotpRemove, request: Request, sess=Depends(current_session)):
     if sess.is_demo:
-        return {"demo": True, "persisted": False}
+        return demo_refusal("Demo sessions don't have a real account to remove two-factor authentication from.")
     repo = request.app.state.repo
     user = repo.user(sess.user_id)
     if not user:

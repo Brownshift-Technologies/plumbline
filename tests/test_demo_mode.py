@@ -104,8 +104,14 @@ def test_repeated_demo_entries_each_get_their_own_independent_session(client):
     assert client.app.state.sessions.resolve(first_sid) is not None
 
 
-def test_seed_demo_if_missing_is_invoked_on_every_demo_entry(client):
+def test_seed_demo_workspace_is_invoked_with_a_fresh_workspace_id_on_every_demo_entry(client):
     calls = []
-    client.app.state.seed_demo_if_missing = lambda: calls.append(1)
-    client.post("/api/auth/demo")
-    assert calls == [1]
+    client.app.state.seed_demo_workspace = lambda workspace_id: calls.append(workspace_id)
+    first = client.post("/api/auth/demo")
+    second = client.post("/api/auth/demo")
+    assert len(calls) == 2
+    # Each entry seeds a DIFFERENT id -- see app/auth_routes.py's demo()
+    # -- and that id is exactly the workspace_id the response reports.
+    assert calls[0] != calls[1]
+    assert calls[0] == first.json()["workspace_id"]
+    assert calls[1] == second.json()["workspace_id"]

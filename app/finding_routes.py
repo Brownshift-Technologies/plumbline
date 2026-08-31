@@ -106,6 +106,16 @@ def _patch_needs_owner_totp(workspace, patch) -> bool:
 
 
 def _check_approve_permission(repo, sess, workspace, patch) -> None:
+    # A demo session holds no real Membership row at all (see
+    # app/deps.py's current_user docstring -- user_id "demo" was never
+    # attached to one), so `repo.role_of` below would always come back
+    # None and 403 every demo session on every approval, gated or not.
+    # That is exactly backwards for this task: approving the gated patch
+    # is the demo's own hero moment, and a demo session is the sole,
+    # de-facto owner of its own sandbox workspace with nobody else's
+    # access to protect. Skip straight to "allowed".
+    if sess.is_demo:
+        return
     role = repo.role_of(sess.user_id, sess.workspace_id)
     if role not in _WRITE_ROLES:
         raise HTTPException(403, f"approving a patch needs one of {_WRITE_ROLES}")
@@ -161,8 +171,6 @@ def approve_patch(
     finding_id: str, request: Request, sess=Depends(current_session),
     _role=Depends(require_write_role("owner", "approver")),
 ):
-    if sess.is_demo:
-        return {"demo": True, "persisted": False}
     repo, ledger = request.app.state.repo, request.app.state.ledger
     finding = _get_finding_or_404(repo, finding_id, sess.workspace_id)
     patch = _get_patch_or_404(repo, finding.id)
@@ -186,8 +194,6 @@ def reject_patch(
     finding_id: str, body: RejectBody, request: Request, sess=Depends(current_session),
     _role=Depends(require_write_role(*_WRITE_ROLES)),
 ):
-    if sess.is_demo:
-        return {"demo": True, "persisted": False}
     note = body.note.strip()
     if len(note) < _MIN_NOTE_LEN:
         raise HTTPException(400, f"a rejection note needs at least {_MIN_NOTE_LEN} characters")
@@ -214,8 +220,6 @@ def request_changes(
     finding_id: str, body: ChangesBody, request: Request, sess=Depends(current_session),
     _role=Depends(require_write_role(*_WRITE_ROLES)),
 ):
-    if sess.is_demo:
-        return {"demo": True, "persisted": False}
     note = body.note.strip()
     if len(note) < _MIN_NOTE_LEN:
         raise HTTPException(400, f"a change request needs at least {_MIN_NOTE_LEN} characters")
@@ -238,8 +242,6 @@ def accept_finding(
     finding_id: str, request: Request, sess=Depends(current_session),
     _role=Depends(require_write_role(*_WRITE_ROLES)),
 ):
-    if sess.is_demo:
-        return {"demo": True, "persisted": False}
     repo = request.app.state.repo
     finding = _get_finding_or_404(repo, finding_id, sess.workspace_id)
     repo.put_finding(type(finding)(**{**finding.__dict__, "status": "accepted"}))
@@ -251,8 +253,6 @@ def snooze_finding(
     finding_id: str, request: Request, sess=Depends(current_session),
     _role=Depends(require_write_role(*_WRITE_ROLES)),
 ):
-    if sess.is_demo:
-        return {"demo": True, "persisted": False}
     repo = request.app.state.repo
     finding = _get_finding_or_404(repo, finding_id, sess.workspace_id)
     repo.put_finding(type(finding)(**{**finding.__dict__, "status": "snoozed"}))

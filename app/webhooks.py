@@ -47,7 +47,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from app.deps import current_session, require_write_role
+from app.deps import current_session, demo_refusal, require_write_role
 from app.models import Webhook
 
 router = APIRouter(prefix="/api/webhooks")
@@ -172,7 +172,10 @@ def create_webhook_route(
     _role=Depends(require_write_role("owner")),
 ):
     if sess.is_demo:
-        return {"demo": True, "persisted": False}
+        # Outbound delivery (`deliver`, above) posts to a URL the visitor
+        # supplies -- a real HTTP call to somewhere outside this codebase's
+        # control, no matter how harmless creating the row alone would be.
+        return demo_refusal("Webhooks would deliver to a real URL outside the demo, so creating one isn't available.")
     unknown = [e for e in body.events if e not in _VALID_EVENTS]
     if unknown:
         raise HTTPException(400, f"unknown event(s) {unknown} -- choose from {sorted(_VALID_EVENTS)}")
@@ -196,7 +199,7 @@ def delete_webhook_route(
     _role=Depends(require_write_role("owner")),
 ):
     if sess.is_demo:
-        return {"demo": True, "persisted": False}
+        return demo_refusal("There's no real webhook in the demo to delete.")
     repo = request.app.state.repo
     if not delete_webhook(repo.store, sess.workspace_id, webhook_id):
         raise HTTPException(404, "no such webhook")

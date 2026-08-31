@@ -49,7 +49,7 @@ from dataclasses import dataclass
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from app.deps import current_session, require_write_role
+from app.deps import current_session, demo_refusal, require_write_role
 from app.models import ApiKey
 
 router = APIRouter(prefix="/api/keys")
@@ -227,7 +227,14 @@ def create_key(
     _role=Depends(require_write_role("owner")),
 ):
     if sess.is_demo:
-        return {"demo": True, "persisted": False}
+        # A `pk_live_` key authenticates `/v1/` requests against whichever
+        # workspace it was issued for -- including this demo session's own
+        # sandbox -- for as long as it stays valid, which is not bounded by
+        # the 2-hour session TTL the way the sandbox itself is. Refused,
+        # not turned into a real (if harmless) write, so a demo visitor
+        # never walks away with a credential this codebase makes any
+        # promise about outliving the session that created it.
+        return demo_refusal("Creating an API key isn't available in the demo -- keys would outlive the sandbox.")
     if body.role not in _VALID_ROLES:
         raise HTTPException(400, f"role must be one of {_VALID_ROLES}")
     repo = request.app.state.repo
@@ -258,7 +265,7 @@ def delete_key(
     _role=Depends(require_write_role("owner")),
 ):
     if sess.is_demo:
-        return {"demo": True, "persisted": False}
+        return demo_refusal("There's no real API key in the demo to revoke.")
     repo = request.app.state.repo
     if not revoke_api_key(repo.store, sess.workspace_id, key_id):
         raise HTTPException(404, "no such key")

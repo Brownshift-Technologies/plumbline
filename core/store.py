@@ -93,6 +93,70 @@ class Store:
     def put(self, collection: str, doc_id: str, data: dict) -> None:
         self._client.collection(self._name(collection)).document(doc_id).set(data)
 
+    def put_many(self, collection: str, items: list[tuple[str, dict]]) -> None:
+        """Bulk-write `items` (`(doc_id, data)` pairs) to `collection` in as
+        few Firestore round trips as a `WriteBatch` allows, rather than one
+        `put()` -- one network round trip -- per document.
+
+        This exists for exactly one caller today: `seed/demo.py`, seeding
+        a fresh per-session demo workspace (routes, 342 behaviours, 18
+        runs) on every `POST /api/auth/demo` now that each demo session
+        gets its own sandbox rather than one shared, seed-once workspace.
+        `gateway/ledger.py`'s `append_many` already solved the identical
+        problem for the ledger (see that method's own docstring for the
+        `DeadlineExceeded` this exact shape of loop caused in production);
+        this is the same fix for every OTHER collection `seed_demo` writes,
+        which has no hash-chain-in-one-transaction requirement `append_many`
+        needed, so a plain `WriteBatch` (not a transaction) is enough here.
+
+        A `WriteBatch` caps at 500 operations, so `items` longer than that
+        is chunked into consecutive batches -- still a handful of round
+        trips for hundreds of documents, not hundreds of them.
+        """
+        if not items:
+            return
+        collection_ref = self._client.collection(self._name(collection))
+        chunk_size = 500
+        for start in range(0, len(items), chunk_size):
+            batch = self._client.batch()
+            for doc_id, data in items[start:start + chunk_size]:
+                batch.set(collection_ref.document(doc_id), data)
+            batch.commit()
+
+    def delete(self, collection: str, doc_id: str) -> None:
+        """A real delete -- unlike `put`, which every other write in this
+        module goes through, this is NOT append/replace-only. Every
+        existing collection in this codebase is deliberately tombstoned
+        rather than deleted (`Repo.delete_session`, `app/member_routes.py`'s
+        membership removal, ...) because those rows are the record of
+        something that happened and stay meaningful after the fact.
+
+        A demo sandbox workspace is different: nothing in it is a record
+        of anything real, it exists only for the 2 hours a demo session is
+        alive, and letting abandoned ones accumulate forever in Firestore
+        is a pure cost with no offsetting value the way a tombstoned audit
+        row has. `app/main.py`'s expired-demo-workspace sweep is the one
+        caller of this method (via `delete_many` below) -- see that
+        module for why a real delete is the right call there and nowhere
+        else in this codebase.
+        """
+        self._client.collection(self._name(collection)).document(doc_id).delete()
+
+    def delete_many(self, collection: str, doc_ids: list[str]) -> None:
+        """Bulk `delete` the same way `put_many` bulk-`put`s -- one
+        `WriteBatch` per up-to-500 documents rather than one round trip
+        per id. See `delete`'s own docstring for why this collection
+        genuinely deletes rather than tombstones."""
+        if not doc_ids:
+            return
+        collection_ref = self._client.collection(self._name(collection))
+        chunk_size = 500
+        for start in range(0, len(doc_ids), chunk_size):
+            batch = self._client.batch()
+            for doc_id in doc_ids[start:start + chunk_size]:
+                batch.delete(collection_ref.document(doc_id))
+            batch.commit()
+
     def get(self, collection: str, doc_id: str) -> dict | None:
         snapshot = self._client.collection(self._name(collection)).document(doc_id).get()
         return snapshot.to_dict() if snapshot.exists else None

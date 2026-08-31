@@ -37,7 +37,7 @@ figure).
 import time
 import uuid
 
-from app.models import Behaviour, Finding, Patch, Route, Run, Step, Workspace
+from app.models import Behaviour, Finding, Patch, Route, Run, Step, Workspace, to_dict
 from gateway.ledger import Ledger
 from gateway.policy import decide
 
@@ -140,6 +140,15 @@ _RUN_4471_STEPS: list[tuple[str, str, str, str, int]] = [
      "Policy will not let an agent merge anything under payments/*.", "gated", 21_000),
 ]
 
+# Public aliases for the same two fixtures, reused (not duplicated) by
+# `app/run_routes.py`'s simulated `POST /api/runs` for a demo session: the
+# whole point of "write the run and its steps to the sandbox from the
+# fixture" (this task's brief) is the SAME reasoning chain and diff a
+# visitor already sees on the pre-seeded run 4471, not a second,
+# independently-authored story that could drift from it.
+DEMO_RUN_TRACE = _RUN_4471_STEPS
+DEMO_PATCH_DIFF = _PAYMENTS_DIFF
+
 _FILLER_TRIGGERS = [
     "Push to main · dependency bump", "Scheduled · nightly chaos sweep",
     "Manual · pre-release smoke", "Pull request · routine review",
@@ -147,31 +156,72 @@ _FILLER_TRIGGERS = [
 _FILLER_STARTED_BY = ["Roger K.", "Ama O.", "Chaos", "Surgeon"]
 
 
-def _route_id(path: str) -> str:
-    return "route_" + (path.strip("/").replace("/", "_").replace(":", "") or "root")
+# --- per-workspace-scoped ids ------------------------------------------
+#
+# Every id-generating helper below takes `ws_id` and folds it into the id
+# it returns. Before this task that was unnecessary: `seed_demo` ever only
+# wrote into ONE shared workspace (`config.demo_workspace_id`), so a fixed
+# id like `"finding_double_charge"` or `"route_checkout_payment"` was
+# already unique across the whole `Store` -- nothing else in Firestore
+# could collide with it. Once every demo SESSION gets its own sandbox
+# workspace (this task), that stops being true: two sessions calling
+# `seed_demo` with two different `workspace_id`s but the SAME unscoped id
+# would both `Store.put` to the exact same document, and the second
+# session's seed call would silently overwrite -- and re-home to its own
+# `workspace_id` -- the first session's already-seeded row. That is not a
+# hypothetical: it is exactly the bug this task's own manual curl
+# verification caught (session A's 342 behaviours vanished the instant
+# session B entered the demo), fixed here by making the workspace id part
+# of every one of these documents' identity, not just a field on it.
+def _route_id(ws_id: str, path: str) -> str:
+    return f"route_{ws_id}_" + (path.strip("/").replace("/", "_").replace(":", "") or "root")
+
+
+def _run_id(ws_id: str, number: int) -> str:
+    return f"run_demo_{ws_id}_{number}"
 
 
 def _seed_routes(repo, ws_id: str) -> None:
+    # `repo.store.put_many`, not 17 individual `repo.put_route` calls --
+    # small on its own, but every collection in this module moved to bulk
+    # writes together (see `_seed_behaviours`'s own docstring below for the
+    # actual reason this matters).
     now = time.time()
-    for path, pct in _ROUTES:
-        repo.put_route(Route(id=_route_id(path), workspace_id=ws_id, path=path,
-                              coverage_pct=pct, last_mapped=now))
+    routes = [
+        Route(id=_route_id(ws_id, path), workspace_id=ws_id, path=path, coverage_pct=pct, last_mapped=now)
+        for path, pct in _ROUTES
+    ]
+    repo.store.put_many("routes", [(r.id, to_dict(r)) for r in routes])
 
 
 def _seed_behaviours(repo, ws_id: str) -> None:
+    """342 individual `repo.put_behaviour` calls -- 342 Firestore round
+    trips -- is exactly the shape of loop `gateway/ledger.py`'s
+    `append_many` docstring already diagnoses as fine against
+    `FakeFirestore` and fatal against real Firestore: this task's own
+    "per-session seeding multiplies an already-measured `DeadlineExceeded`"
+    warning is about this collection specifically, the single largest one
+    `seed_demo` writes. `repo.store.put_many` (`core/store.py`) is the same
+    `WriteBatch` fix, generalised past the ledger's own hash-chain-in-one-
+    transaction requirement to a plain collection.
+    """
+    behaviours: list[Behaviour] = []
     for path, count in _BEHAVIOUR_COUNTS.items():
         tags: tuple[str, ...] = ()
         if path.startswith("/checkout/payment"):
             tags = ("payments",)
         elif path.startswith("/account/security"):
             tags = ("security",)
-        for i in range(count):
-            slug = _route_id(path)
-            repo.put_behaviour(Behaviour(
+        slug = _route_id(ws_id, path)
+        behaviours.extend(
+            Behaviour(
                 id=f"beh_demo_{slug}_{i}", workspace_id=ws_id,
                 text=f"{path} keeps working under normal use (#{i + 1})",
                 route=path, tags=tags, source="author",
-            ))
+            )
+            for i in range(count)
+        )
+    repo.store.put_many("behaviours", [(b.id, to_dict(b)) for b in behaviours])
 
 
 def _seed_findings_and_patch(repo, ws_id: str) -> dict[str, Finding]:
@@ -186,14 +236,15 @@ def _seed_findings_and_patch(repo, ws_id: str) -> dict[str, Finding]:
         # never fetches the gated patch below, and "Approve and merge"
         # never renders -- see `test_the_seeded_run_4471_links_to_the_
         # gated_double_charge_finding` in `tests/test_seed_demo.py`.
-        run_id = "run_demo_4471" if key == "double_charge" else ""
+        run_id = _run_id(ws_id, 4471) if key == "double_charge" else ""
         finding = Finding(
-            id=f"finding_{key}", workspace_id=ws_id, title=title, route=route,
+            id=f"finding_{ws_id}_{key}", workspace_id=ws_id, title=title, route=route,
             found_by=found_by, status=status, severity=severity, repro_count=repro,
             at=now - age_seconds, run_id=run_id,
         )
-        repo.put_finding(finding)
         findings[key] = finding
+
+    repo.store.put_many("findings", [(f.id, to_dict(f)) for f in findings.values()])
 
     double_charge = findings["double_charge"]
     repo.put_patch(Patch(
@@ -204,28 +255,31 @@ def _seed_findings_and_patch(repo, ws_id: str) -> dict[str, Finding]:
     return findings
 
 
-def _seed_run_4471_steps(repo) -> None:
+def _run_4471_steps(ws_id: str) -> list[Step]:
     started = time.time() - 22 * 60  # "22 minutes ago", matching the design
     at = started
+    steps = []
+    run_id = _run_id(ws_id, 4471)
     for agent, summary, detail, outcome, duration_ms in _RUN_4471_STEPS:
-        repo.append_step(Step(
-            id=f"st_demo_4471_{agent}", run_id="run_demo_4471", agent=agent,
+        steps.append(Step(
+            id=f"st_demo_{ws_id}_4471_{agent}", run_id=run_id, agent=agent,
             summary=summary, detail=detail, outcome=outcome, duration_ms=duration_ms, at=at,
         ))
         at += duration_ms / 1000
+    return steps
 
 
 def _seed_runs(repo, ws_id: str) -> None:
     now = time.time()
+    runs = []
 
     for number, trigger, commit, state, held, failed, repaired, duration_ms, started_by in _NAMED_RUNS:
         minutes_ago = (4471 - number) * 45 + 22
-        repo.put_run(Run(
-            id=f"run_demo_{number}", workspace_id=ws_id, number=number, trigger=trigger,
+        runs.append(Run(
+            id=_run_id(ws_id, number), workspace_id=ws_id, number=number, trigger=trigger,
             state=state, commit=commit, started_by=started_by, held=held, failed=failed,
             repaired=repaired, duration_ms=duration_ms, started_at=now - minutes_ago * 60,
         ))
-    _seed_run_4471_steps(repo)
 
     # 4454-4466: 13 older, unremarkable finished runs -- enough for
     # pagination to have something to page through, without every run
@@ -235,14 +289,17 @@ def _seed_runs(repo, ws_id: str) -> None:
         failed = i % 3
         repaired = i % 2
         minutes_ago = (4471 - number) * 45 + 22
-        repo.put_run(Run(
-            id=f"run_demo_{number}", workspace_id=ws_id, number=number,
+        runs.append(Run(
+            id=_run_id(ws_id, number), workspace_id=ws_id, number=number,
             trigger=_FILLER_TRIGGERS[i % len(_FILLER_TRIGGERS)],
             state="finished", commit=uuid.uuid5(uuid.NAMESPACE_URL, f"demo-{number}").hex[:7],
             started_by=_FILLER_STARTED_BY[i % len(_FILLER_STARTED_BY)],
             held=held, failed=failed, repaired=repaired,
             duration_ms=280_000 + i * 5_000, started_at=now - minutes_ago * 60,
         ))
+
+    repo.store.put_many("runs", [(r.id, to_dict(r)) for r in runs])
+    repo.store.put_many("steps", [(s.id, to_dict(s)) for s in _run_4471_steps(ws_id)])
 
 
 # The workspace's own `policy_version` above -- every seeded ledger entry
@@ -469,17 +526,34 @@ def _seed_ledger(repo, ws_id: str) -> None:
     )
 
 
-def seed_demo(repo, config) -> Workspace:
-    """Write (or idempotently rewrite) the whole demo fixture and return
-    the `Workspace` it lives in. Safe to call on every `POST /api/auth/demo`
-    (`app/main.py`'s `_seed_demo_if_missing_factory` does exactly that) --
-    see the module docstring for why repeated calls never duplicate
-    anything."""
-    ws_id = config.demo_workspace_id
+def seed_demo(repo, config, workspace_id: str | None = None) -> Workspace:
+    """Write the whole demo fixture into `workspace_id` (or, when omitted,
+    `config.demo_workspace_id` -- kept for every caller that seeded the one
+    shared template workspace before this task) and return the `Workspace`
+    it lives in.
+
+    **One sandbox per demo session, not one shared workspace.** Before this
+    task, every demo visitor shared `config.demo_workspace_id` and could
+    write nothing to it -- see this task's own report for why that made
+    the demo unusable. `app/main.py`'s demo entry point now mints a fresh
+    `ws_demo_<token>` id per session and calls this with it, so each
+    visitor gets their own copy of the fixture they can actually write to;
+    `workspace_id` defaulting to the old shared id is what keeps
+    `tests/test_demo_seed.py`'s ~20 tests -- which only care about the
+    fixture's own shape and idempotency, not multi-tenancy -- calling
+    `seed_demo(repo, config)` unchanged.
+
+    Idempotent PER WORKSPACE ID, same as before: calling this twice with
+    the same `workspace_id` writes the same documents twice (a no-op, see
+    the module docstring), never a duplicate -- but two different ids
+    always get two fully independent copies of the fixture, which is the
+    whole point now.
+    """
+    ws_id = workspace_id or config.demo_workspace_id
     workspace = Workspace(
         id=ws_id, name="Acme", repo="acme/storefront", plan="team", seats=5,
         run_limit=500, runs_used=18, policy_version=14, is_demo=True,
-        gate_rules=(), environments=(),
+        gate_rules=(), environments=(), created_at=time.time(),
     )
     repo.put_workspace(workspace)
 

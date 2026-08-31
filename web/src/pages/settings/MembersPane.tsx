@@ -28,7 +28,7 @@ function InviteForm({ onInvited }: { onInvited: () => void }) {
     setSending(true);
     try {
       const res = await api.post("/members/invite", { email, role });
-      show(isDemoWrite(res) ? demoWriteMessage(`${email} would be invited`) : `Invited ${email}.`);
+      show(isDemoWrite(res) ? demoWriteMessage(res, `${email} would be invited`) : `Invited ${email}.`);
       setEmail("");
       setOpen(false);
       onInvited();
@@ -80,7 +80,7 @@ export function MembersPane({ user }: { user: AsyncState<CurrentUser> }) {
   async function changeRole(m: Member, role: Role) {
     try {
       const res = await api.patch(`/members/${m.id}`, { role });
-      show(isDemoWrite(res) ? demoWriteMessage(`${m.name}'s role would change to ${ROLE_LABEL[role]}`) : `${m.name}'s role changed to ${ROLE_LABEL[role]}.`);
+      show(isDemoWrite(res) ? demoWriteMessage(res, `${m.name}'s role would change to ${ROLE_LABEL[role]}`) : `${m.name}'s role changed to ${ROLE_LABEL[role]}.`);
       members.reload();
     } catch (err) {
       show(err instanceof Error ? err.message : "Couldn't change that role.");
@@ -90,7 +90,7 @@ export function MembersPane({ user }: { user: AsyncState<CurrentUser> }) {
   async function remove(m: Member) {
     try {
       const res = await api.del(`/members/${m.id}`);
-      show(isDemoWrite(res) ? demoWriteMessage(`${m.name} would be removed`) : `${m.name} removed.`);
+      show(isDemoWrite(res) ? demoWriteMessage(res, `${m.name} would be removed`) : `${m.name} removed.`);
       members.reload();
     } catch (err) {
       show(err instanceof Error ? err.message : "Couldn't remove that member.");

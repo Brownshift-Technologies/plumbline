@@ -57,9 +57,13 @@ def test_a_reader_cannot_create_a_behaviour(client_as_reader):
     assert r.status_code == 403
 
 
-def test_a_demo_session_create_is_a_no_op(client_demo):
+def test_a_demo_session_can_create_a_behaviour_and_read_it_back(client_demo):
     r = client_demo.post("/api/behaviours", json={"text": "x", "route": "/y"})
-    assert r.json() == {"demo": True, "persisted": False}
+    assert r.status_code == 200
+    body = r.json()
+    assert body["text"] == "x" and "demo" not in body
+    listed = client_demo.get("/api/behaviours").json()["behaviours"]
+    assert any(b["id"] == body["id"] for b in listed)
 
 
 def test_updating_a_behaviour(client_as_owner, repo):

@@ -78,6 +78,27 @@ def is_demo(sess=Depends(current_session)) -> bool:
     return sess.is_demo
 
 
+def demo_refusal(reason: str) -> dict:
+    """The response shape for a write a demo session genuinely cannot do
+    -- because it reaches OUTSIDE that session's own sandbox workspace
+    (a real GitHub repository, a real environment, an outbound webhook, an
+    API key or account setting that would work past the demo) -- as
+    opposed to `{"demo": True, "persisted": False}` alone, which every
+    write-capable route used to return unconditionally.
+
+    That original, reason-less shape is what made the demo's honest
+    banner into a lie in the OTHER direction once each session got its
+    own real, writable sandbox (this task): a judge who approves the
+    gated patch or edits a gate rule sees it genuinely take effect, so a
+    generic "nothing was saved" on the small remaining set of routes that
+    really do refuse would read as a bug, not a boundary. `reason` is a
+    complete sentence explaining WHY this particular action reaches past
+    the sandbox -- `web/src/lib/demo.ts`'s `demoWriteMessage` prefers it
+    over the generic wording whenever a response carries one.
+    """
+    return {"demo": True, "persisted": False, "reason": reason}
+
+
 def require_write_role(*roles):
     """Like `require_role`, but for a route that also has to accept a demo
     session -- Task 14a onward's write-capable routes (`POST /api/runs`,

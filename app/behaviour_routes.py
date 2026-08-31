@@ -12,6 +12,12 @@ gone everywhere a caller does not go looking for it, while the underlying
 document -- and everything that ever referenced its id -- stays intact.
 This is the same tombstone discipline `Repo.delete_session` already uses
 for a collection with no delete of its own.
+
+**Demo sessions write for real.** A demo session's `sess.workspace_id` is
+its own per-session sandbox (`app/auth_routes.py`'s `demo()`), so every
+route below runs exactly the same write path a real session gets -- no
+`sess.is_demo` short-circuit. Nothing here reaches outside that sandbox,
+so nothing here needs to refuse.
 """
 
 import uuid
@@ -83,8 +89,6 @@ def create_behaviour(
     body: CreateBehaviour, request: Request, sess=Depends(current_session),
     _role=Depends(require_write_role(*_WRITE_ROLES)),
 ):
-    if sess.is_demo:
-        return {"demo": True, "persisted": False}
     if not body.text.strip() or not body.route.strip():
         raise HTTPException(400, "a behaviour needs both text and a route")
 
@@ -102,8 +106,6 @@ def update_behaviour(
     behaviour_id: str, body: UpdateBehaviour, request: Request, sess=Depends(current_session),
     _role=Depends(require_write_role(*_WRITE_ROLES)),
 ):
-    if sess.is_demo:
-        return {"demo": True, "persisted": False}
     repo = request.app.state.repo
     row = _get_or_404(repo, behaviour_id, sess.workspace_id)
     updates = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None}
@@ -119,8 +121,6 @@ def delete_behaviour(
     behaviour_id: str, request: Request, sess=Depends(current_session),
     _role=Depends(require_write_role("owner")),
 ):
-    if sess.is_demo:
-        return {"demo": True, "persisted": False}
     repo = request.app.state.repo
     row = _get_or_404(repo, behaviour_id, sess.workspace_id)
     repo.put_behaviour(type(row)(**{**row.__dict__, "status": "deleted"}))

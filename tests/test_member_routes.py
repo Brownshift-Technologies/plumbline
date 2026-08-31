@@ -184,18 +184,24 @@ def test_removal_is_written_to_the_ledger_with_the_actor(client_as_owner, repo, 
     assert entries[0]["detail"]["user_id"] == user.id
 
 
-def test_a_demo_session_gets_the_demo_response_not_a_403(client_demo):
+def test_a_demo_session_can_invite_change_role_and_remove_a_member_for_real(client_demo):
+    # A demo session's writes land in its own real sandbox now -- not a
+    # 403 (no real Membership backs `require_write_role`'s bypass for a
+    # demo session -- see app/deps.py) and not the old discarded-write
+    # stub either.
     invite = client_demo.post("/api/members/invite", json={"email": "new@acme.com", "role": "reader"})
     assert invite.status_code == 200
-    assert invite.json() == {"demo": True, "persisted": False}
+    invited = invite.json()
+    assert invited["email"] == "new@acme.com" and "demo" not in invited
 
-    patch = client_demo.patch("/api/members/m_whatever", json={"role": "reader"})
+    patch = client_demo.patch(f"/api/members/{invited['id']}", json={"role": "approver"})
     assert patch.status_code == 200
-    assert patch.json() == {"demo": True, "persisted": False}
+    assert patch.json()["role"] == "approver"
 
-    delete = client_demo.delete("/api/members/m_whatever")
+    delete = client_demo.delete(f"/api/members/{invited['id']}")
     assert delete.status_code == 200
-    assert delete.json() == {"demo": True, "persisted": False}
+    assert delete.json() == {"ok": True}
+    assert not any(m["id"] == invited["id"] for m in client_demo.get("/api/members").json())
 
 
 # --- happy paths, for completeness ------------------------------------------

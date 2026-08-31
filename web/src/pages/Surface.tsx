@@ -30,7 +30,7 @@ export function Surface() {
   async function onRemap() {
     try {
       const res = await api.post("/surface/remap");
-      show(isDemoWrite(res) ? demoWriteMessage("the repository would be re-mapped") : "Re-mapping the repository.");
+      show(isDemoWrite(res) ? demoWriteMessage(res, "the repository would be re-mapped") : "Re-mapping the repository.");
       surface.reload();
     } catch (err) {
       show(err instanceof Error ? err.message : "Couldn't start a re-map.");
@@ -44,7 +44,7 @@ export function Surface() {
         routes: uncovered.map((r) => r.path),
       });
       if (isDemoWrite(res)) {
-        show(demoWriteMessage("behaviours would be written for the missing routes"));
+        show(demoWriteMessage(res, "behaviours would be written for the missing routes"));
         return;
       }
       show("Writing behaviours for the missing routes.");

@@ -35,7 +35,7 @@ from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from pydantic import BaseModel
 
 from agents.repo_source import import_specs
-from app.deps import current_session, require_write_role
+from app.deps import current_session, demo_refusal, require_write_role
 from app.github import verify_webhook_signature
 
 router = APIRouter()
@@ -92,7 +92,11 @@ def connect_repo(
     _role=Depends(require_write_role("owner")),
 ):
     if sess.is_demo:
-        return {"demo": True, "persisted": False}
+        # A real write here binds Plumbline to a real GitHub App
+        # installation and calls `GitHubApp.bind` -- api.github.com, not
+        # this sandbox. See this task's report for the full "must stay
+        # refused" list.
+        return demo_refusal("Connecting a repository needs a real account -- the demo runs against seeded data.")
     if workspace_id != sess.workspace_id:
         raise HTTPException(404, "no such workspace")
     repo = request.app.state.repo
@@ -120,7 +124,7 @@ def disconnect_repo(
     _role=Depends(require_write_role("owner")),
 ):
     if sess.is_demo:
-        return {"demo": True, "persisted": False}
+        return demo_refusal("There's no real repository connected in the demo to disconnect.")
     if workspace_id != sess.workspace_id:
         raise HTTPException(404, "no such workspace")
     repo = request.app.state.repo
@@ -142,7 +146,10 @@ def import_repo_specs(
     _role=Depends(require_write_role("owner", "approver")),
 ):
     if sess.is_demo:
-        return {"demo": True, "persisted": False}
+        # Reads real files from a real GitHub repository -- see the module
+        # docstring's "Import never writes to the repo" note; it still
+        # calls api.github.com, which is exactly what must stay refused.
+        return demo_refusal("Importing specs reads from a real GitHub repository, which isn't available in the demo.")
     repo = request.app.state.repo
     workspace = repo.workspace(sess.workspace_id)
     if workspace is None or not workspace.repo_full_name:

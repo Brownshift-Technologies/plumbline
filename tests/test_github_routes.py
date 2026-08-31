@@ -20,9 +20,15 @@ def test_a_reader_cannot_connect_a_repository(client_as_reader):
 
 
 def test_a_demo_session_cannot_connect_a_repository(client_demo):
-    resp = client_demo.post("/api/workspaces/ws_demo/repo", json=_connect_body())
+    ws_id = client_demo.get("/api/auth/me").json()["workspace_id"]
+    resp = client_demo.post(f"/api/workspaces/{ws_id}/repo", json=_connect_body())
     assert resp.status_code == 200
-    assert resp.json() == {"demo": True, "persisted": False}
+    body = resp.json()
+    # Real GitHub connections still stay refused in a demo session's own
+    # sandbox -- see this task's report's "must stay refused" list -- but
+    # with a reason explaining why, not the old bare "nothing was saved".
+    assert body["demo"] is True and body["persisted"] is False
+    assert "repository" in body["reason"].lower()
 
 
 def test_an_owner_can_connect_after_an_installation_exists(client_as_owner):

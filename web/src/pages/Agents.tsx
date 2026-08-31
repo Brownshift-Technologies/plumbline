@@ -50,7 +50,7 @@ export function Agents() {
     try {
       const res = await api.post("/agents/pause", name ? { agent: name } : undefined);
       if (isDemoWrite(res)) {
-        show(demoWriteMessage(name ? `${name} would pause` : "every agent would pause"));
+        show(demoWriteMessage(res, name ? `${name} would pause` : "every agent would pause"));
       } else {
         show(name ? `${name} paused.` : "All agents paused.");
       }
@@ -63,7 +63,7 @@ export function Agents() {
   async function resume(name: string) {
     try {
       const res = await api.post("/agents/resume", { agent: name });
-      show(isDemoWrite(res) ? demoWriteMessage(`${name} would resume`) : `${name} resumed.`);
+      show(isDemoWrite(res) ? demoWriteMessage(res, `${name} would resume`) : `${name} resumed.`);
       agents.refresh();
     } catch (err) {
       show(err instanceof Error ? err.message : "Couldn't resume.");

@@ -70,16 +70,17 @@ its severity tiebreak.
 
 import asyncio
 import json
+import threading
 import time
 import uuid
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.deps import current_session, require_write_role
-from app.models import Run
+from app.models import Finding, Patch, Run, Step
 
 router = APIRouter(prefix="/api/runs")
 
@@ -185,6 +186,102 @@ def enqueue_run(request: Request, sess, trigger: str, commit: str = "") -> Run:
     return run
 
 
+_DEMO_RUN_STEP_SECONDS_DEFAULT = 1.4
+
+
+def _play_demo_run(repo, ledger, run: Run, pace: float, sleep=time.sleep) -> None:
+    """The background worker behind `simulate_run` -- runs off the request
+    thread so `POST /api/runs` still returns immediately (matching
+    `enqueue_run`'s own "returns as soon as the job is started" contract),
+    trickling `run.id`'s steps into Firestore at `pace` seconds apart.
+    `GET /{run_id}/stream` needs no changes at all to pick them up: its
+    poll loop (`_run_events`) already reads whatever `Repo.steps_for_run`
+    returns, with no opinion on what process wrote it.
+
+    Reuses `seed.demo.DEMO_RUN_TRACE`/`DEMO_PATCH_DIFF` -- the exact same
+    reasoning chain and diff the pre-seeded run 4471 already tells (see
+    those aliases' own docstring in `seed/demo.py`) -- rather than a
+    second, independently-authored story, so a freshly triggered demo run
+    ends at the identical kind of gated payments patch a visitor may
+    already have seen without ever clicking "start a run" at all.
+    """
+    from seed.demo import DEMO_PATCH_DIFF, DEMO_RUN_TRACE
+
+    held = failed = 0
+    for agent, summary, detail, outcome, duration_ms in DEMO_RUN_TRACE:
+        sleep(pace)
+        repo.append_step(Step(
+            id=f"st_{run.id}_{agent}", run_id=run.id, agent=agent,
+            summary=summary, detail=detail, outcome=outcome, duration_ms=duration_ms, at=time.time(),
+        ))
+        if outcome == "failed":
+            failed += 1
+        elif outcome == "ok":
+            held += 1
+
+    # The finding/patch the whole trace was building toward -- a fresh,
+    # freely-approvable gated patch in THIS run's own sandbox, not a
+    # pointer back at the pre-seeded fixture's own finding_double_charge/
+    # run_demo_4471 (a second visitor triggering their own run must not
+    # somehow share or contend over one workspace's worth of gate state).
+    finding = Finding(
+        id=f"finding_{run.id}", workspace_id=run.workspace_id,
+        title="A retried payment charges the customer twice", route="/checkout/payment",
+        found_by="chaos", status="patch_ready", severity="high", repro_count=5,
+        at=time.time(), run_id=run.id,
+    )
+    repo.put_finding(finding)
+    repo.put_patch(Patch(
+        id=f"patch_{finding.id}", finding_id=finding.id, diff=DEMO_PATCH_DIFF,
+        files=("src/checkout/payment-client.ts",), added=7, removed=2, verified=True,
+        pr_url="https://github.com/example/repo/pull/2211", gate_state="awaiting_approval",
+    ))
+
+    finished = repo.run(run.id)
+    if finished is not None:
+        repo.put_run(type(finished)(**{
+            **finished.__dict__, "state": "finished", "held": held, "failed": failed,
+            "duration_ms": int((time.time() - run.started_at) * 1000),
+        }))
+    ledger.append(
+        run.workspace_id, "surgeon", "pr.merge",
+        {"decision": "gated", "reason": "human approval required for src/checkout/payment*", "target": "src/checkout/payment-client.ts"},
+    )
+
+
+def simulate_run(request: Request, sess, trigger: str, commit: str = "") -> Run:
+    """The demo-session analogue of `enqueue_run`. A real run drives a
+    browser against a customer's app, which a demo sandbox has no
+    business doing -- there is no real app behind it, and no
+    `app.state.enqueue_job` call this codebase could honestly make on a
+    demo visitor's behalf. Instead, `POST /api/runs` (and
+    `app/surface_routes.py`'s `POST /api/surface/remap`, which shares
+    this the same way it shares `enqueue_run`) writes a real `Run` into
+    the caller's own sandbox workspace and plays the demo's fixture
+    reasoning chain into it in the background (`_play_demo_run`),
+    streamable over the SAME `GET /{run_id}/stream` a real run uses, so a
+    judge who clicks "start a run" sees it build live and land on a fresh
+    gated patch -- reachable, not just the one pre-seeded example.
+    """
+    repo = request.app.state.repo
+    workspace = repo.workspace(sess.workspace_id)
+    if workspace is None:
+        raise HTTPException(404, "no such workspace")
+
+    number = _allocate_run_number(repo, workspace.id)
+    run = Run(
+        id=f"run_{uuid.uuid4().hex[:12]}", workspace_id=workspace.id, number=number,
+        trigger=trigger, commit=commit, started_by=sess.user_id, state="running",
+    )
+    repo.put_run(run)
+
+    pace = getattr(request.app.state, "demo_run_step_seconds", _DEMO_RUN_STEP_SECONDS_DEFAULT)
+    threading.Thread(
+        target=_play_demo_run, args=(repo, request.app.state.ledger, run, pace), daemon=True,
+    ).start()
+    return run
+
+
 class CreateRun(BaseModel):
     trigger: str = "manual"
     commit: str = ""
@@ -232,9 +329,15 @@ def create_run(
     body: CreateRun, request: Request, sess=Depends(current_session),
     _role=Depends(require_write_role("owner", "approver")),
 ):
-    if sess.is_demo:
-        return JSONResponse({"demo": True, "persisted": False}, status_code=200)
-    run = enqueue_run(request, sess, body.trigger, body.commit)
+    # A demo session gets a SIMULATED run in its own sandbox, not a
+    # discarded write -- a real app has never actually run, so this is not
+    # `enqueue_run` with the enqueue swapped out, it is `simulate_run`
+    # end to end. No `demo`/`persisted` keys on this response: unlike the
+    # routes that still genuinely refuse, this one worked, and the
+    # frontend's `isDemoWrite` (`web/src/lib/demo.ts`) exists precisely to
+    # tell those two cases apart.
+    run = simulate_run(request, sess, body.trigger, body.commit) if sess.is_demo \
+        else enqueue_run(request, sess, body.trigger, body.commit)
     return {"id": run.id, "number": run.number, "state": run.state}
 
 
@@ -260,8 +363,10 @@ def cancel_run(
     run_id: str, request: Request, sess=Depends(current_session),
     _role=Depends(require_write_role("owner", "approver")),
 ):
-    if sess.is_demo:
-        return {"demo": True, "persisted": False}
+    # A demo session cancels a real run in its own sandbox too -- a
+    # simulated run starts straight into "running" (`simulate_run` above),
+    # so the same "only a queued run can be cancelled" check below applies
+    # unchanged rather than needing a demo-specific branch.
     repo = request.app.state.repo
     run = repo.run(run_id)
     if run is None or run.workspace_id != sess.workspace_id:

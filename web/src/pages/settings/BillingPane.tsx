@@ -65,7 +65,7 @@ export function BillingPane({ user }: { user: AsyncState<CurrentUser> }) {
   async function onChangePlan() {
     try {
       const res = await api.post("/billing/plan", {});
-      show(isDemoWrite(res) ? demoWriteMessage("your plan would change") : "Plan change request sent.");
+      show(isDemoWrite(res) ? demoWriteMessage(res, "your plan would change") : "Plan change request sent.");
       billing.reload();
     } catch (err) {
       show(err instanceof Error ? err.message : "Couldn't change your plan.");
@@ -76,7 +76,7 @@ export function BillingPane({ user }: { user: AsyncState<CurrentUser> }) {
     try {
       const res = await api.post<{ url: string; demo?: boolean; persisted?: boolean }>("/billing/portal");
       if (isDemoWrite(res)) {
-        show(demoWriteMessage("you'd be sent to the billing portal"));
+        show(demoWriteMessage(res, "you'd be sent to the billing portal"));
         return;
       }
       if (res.url) window.location.href = res.url;

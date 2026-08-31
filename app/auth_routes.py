@@ -15,7 +15,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, EmailStr
 
-from app.deps import COOKIE, current_session
+from app.deps import COOKIE, current_session, demo_refusal
 from app.models import Membership, User
 from app.security import hash_password, verify_password
 
@@ -129,14 +129,27 @@ def signin(body: SignIn, request: Request, response: Response):
 
 @router.post("/demo")
 def demo(request: Request, response: Response):
-    cfg = request.app.state.config
-    request.app.state.seed_demo_if_missing()
-    sess = request.app.state.sessions.issue("demo", cfg.demo_workspace_id, is_demo=True)
+    # Every demo visitor gets their OWN sandbox workspace -- a fresh copy
+    # of the seeded fixture that session can fully write to -- rather than
+    # sharing one read-only `config.demo_workspace_id` with every other
+    # visitor. Isolation is then automatic: every route already scopes by
+    # `sess.workspace_id`, so this is the only place that needs to know a
+    # new id is being minted at all. See this task's own report for why
+    # the old shared-workspace design made the demo unusable.
+    ws_id = f"ws_demo_{uuid.uuid4().hex[:20]}"
+    request.app.state.seed_demo_workspace(ws_id)
+    # Opportunistic, bounded cleanup of OTHER sessions' abandoned sandboxes
+    # -- after seeding this one, never before: a slow or failed sweep must
+    # never be the reason a visitor's own demo entry fails. See
+    # `app/main.py`'s `_sweep_expired_demo_workspaces_factory` for why this
+    # runs here at all rather than a separate `DELETE` route or a cron job.
+    request.app.state.sweep_expired_demo_workspaces()
+    sess = request.app.state.sessions.issue("demo", ws_id, is_demo=True)
     _set_cookie(response, sess.id)
     return {
         "id": "demo",
         "name": "Demo visitor",
-        "workspace_id": cfg.demo_workspace_id,
+        "workspace_id": ws_id,
         "is_demo": True,
     }
 
@@ -150,12 +163,15 @@ def signout(request: Request, response: Response, sess=Depends(current_session))
 
 @router.post("/password")
 def change_password(body: ChangePassword, request: Request, sess=Depends(current_session)):
-    # A demo visitor has no account to change the password of. This is the
-    # reference shape every write-capable route after this task follows for
-    # a demo session: 200, not an error, with `persisted: False` telling the
-    # frontend the action was accepted but intentionally not durable.
+    # A demo session (`user_id == "demo"`) has no `User` row at all -- see
+    # `app/deps.py`'s `current_user` docstring -- so there is no account
+    # here to change the password of, sandbox or not. Unlike the
+    # workspace-scoped writes this task turned into real writes (behaviours,
+    # gate rules, the gated patch, ...), this genuinely has nothing to act
+    # on, so it stays a refusal, just with a reason instead of the old
+    # unconditional "nothing was saved".
     if sess.is_demo:
-        return {"demo": True, "persisted": False}
+        return demo_refusal("Demo sessions don't have a real account to change the password of.")
 
     repo = request.app.state.repo
     user = repo.user(sess.user_id)

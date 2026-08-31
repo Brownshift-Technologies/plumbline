@@ -194,6 +194,57 @@ class Repo:
     def workspace(self, wid: str) -> Workspace | None:
         return _rebuild(Workspace, self._store.get("workspaces", wid))
 
+    def demo_workspaces(self) -> list[Workspace]:
+        """Every workspace flagged `is_demo=True` -- live, real, or a
+        per-session sandbox the expired-demo-workspace sweep
+        (`app/main.py`) is deciding whether to delete. A single-field
+        `Store.query` -- see that module's docstring for why an
+        `is_demo`+`created_at` composite filter is done client-side in the
+        sweep instead of here (no composite index to provision)."""
+        return [Workspace(**_coerce_tuples(Workspace, r)) for r in self._store.query("workspaces", "is_demo", "==", True)]
+
+    def delete_workspace_cascade(self, workspace_id: str) -> None:
+        """Genuinely delete `workspace_id` and every document keyed to it
+        across this codebase's per-workspace collections -- the one place
+        in this `Repo` that calls `Store.delete`/`delete_many` rather than
+        `put` a tombstone. See `core.store.Store.delete`'s own docstring
+        for why a demo sandbox (this method's only caller,
+        `app/main.py`'s expired-demo-workspace sweep) is the one row shape
+        in this codebase that earns a real delete rather than a tombstone.
+
+        Findings/patches/steps are resolved by walking the workspace's own
+        runs/findings first (patches and steps carry no `workspace_id` of
+        their own -- `finding_id`/`run_id` respectively -- exactly like
+        every read path for them already does, e.g. `patch_for_finding`,
+        `steps_for_run`), not queried by a field that does not exist.
+        """
+        findings = self.findings_for_workspace(workspace_id)
+        runs = self.runs_for_workspace(workspace_id)
+
+        patch_ids = [p.id for f in findings if (p := self.patch_for_finding(f.id))]
+        step_ids = [s.id for r in runs for s in self.steps_for_run(r.id)]
+        ledger_ids = [e["id"] for e in self._store.query("ledger", "workspace_id", "==", workspace_id)]
+
+        self._store.delete_many("routes", [r.id for r in self.routes_for_workspace(workspace_id)])
+        self._store.delete_many(
+            "behaviours", [b.id for b in self.behaviours_for_workspace(workspace_id)],
+        )
+        self._store.delete_many("findings", [f.id for f in findings])
+        self._store.delete_many("patches", patch_ids)
+        self._store.delete_many("runs", [r.id for r in runs])
+        self._store.delete_many("steps", step_ids)
+        self._store.delete_many("ledger", ledger_ids)
+        self._store.delete("ledger_head", workspace_id)
+        self._store.delete_many("memberships", [m.id for m in self.members_of(workspace_id)])
+        self._store.delete_many(
+            "api_keys", [k["id"] for k in self._store.query("api_keys", "workspace_id", "==", workspace_id)],
+        )
+        self._store.delete_many(
+            "webhooks", [w["id"] for w in self._store.query("webhooks", "workspace_id", "==", workspace_id)],
+        )
+        self._store.delete("run_counters", workspace_id)
+        self._store.delete("workspaces", workspace_id)
+
     def put_membership(self, m: Membership) -> None:
         self._store.put("memberships", m.id, to_dict(m))
 

@@ -110,7 +110,7 @@ export function Home() {
       const res = await api.post<{ id: string; demo?: boolean; persisted?: boolean }>("/runs", { trigger });
       setPrompt("");
       if (isDemoWrite(res)) {
-        setDemoNotice(demoWriteMessage("this run would start"));
+        setDemoNotice(demoWriteMessage(res, "this run would start"));
         runs.reload();
       } else if (res.id) {
         navigate(routes.run(res.id));

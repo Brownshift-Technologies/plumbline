@@ -88,10 +88,21 @@ def test_approving_writes_the_approver_id_to_the_ledger(client_as_owner, ledger)
     assert approve_entries[0]["actor"].startswith("u_")
 
 
-def test_a_demo_session_cannot_approve(client_demo):
-    r = client_demo.post("/api/findings/f1/patch/approve")
+def test_a_demo_session_can_approve_the_gated_patch(client_demo, repo):
+    # `payments_finding`'s autouse fixture seeds "f1" into "ws1", not this
+    # demo session's own sandbox -- so the finding/patch this test approves
+    # is seeded directly into the demo's real `workspace_id` instead,
+    # exactly the shape `seed/demo.py`'s own gated `finding_double_charge`
+    # takes in production.
+    ws_id = client_demo.get("/api/auth/me").json()["workspace_id"]
+    _make_finding(repo, workspace_id=ws_id, fid="demo_f1")
+    _make_patch(repo, finding_id="demo_f1")
+
+    r = client_demo.post("/api/findings/demo_f1/patch/approve")
     assert r.status_code == 200
-    assert r.json() == {"demo": True, "persisted": False}
+    body = r.json()
+    assert body["ok"] is True and "demo" not in body
+    assert repo.patch_for_finding("demo_f1").gate_state == "merged"
 
 
 def test_approving_a_patch_whose_finding_was_already_resolved_still_works(client_as_owner, repo):
@@ -127,9 +138,16 @@ def test_a_reader_cannot_reject_a_patch(client_as_reader):
     assert r.status_code == 403
 
 
-def test_a_demo_session_reject_is_a_no_op(client_demo):
-    r = client_demo.post("/api/findings/f1/patch/reject", json={"note": "not good enough at all"})
-    assert r.json() == {"demo": True, "persisted": False}
+def test_a_demo_session_can_reject_a_patch_in_its_own_sandbox(client_demo, repo):
+    ws_id = client_demo.get("/api/auth/me").json()["workspace_id"]
+    _make_finding(repo, workspace_id=ws_id, fid="demo_f1")
+    _make_patch(repo, finding_id="demo_f1")
+
+    r = client_demo.post("/api/findings/demo_f1/patch/reject", json={"note": "not good enough at all"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True and "demo" not in body
+    assert repo.patch_for_finding("demo_f1").gate_state == "rejected"
 
 
 def test_requesting_changes_requires_a_substantive_note(client_as_owner):

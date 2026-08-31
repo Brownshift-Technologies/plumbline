@@ -47,9 +47,17 @@ def test_owner_can_pause_and_resume_the_fleet(client_as_owner, repo):
     assert repo.workspace("ws1").fleet_paused is False
 
 
-def test_a_demo_session_pause_is_a_no_op(client_demo):
+def test_a_demo_session_can_pause_and_resume_its_own_sandbox_fleet(client_demo):
+    # A demo session's writes now land in its own real sandbox workspace
+    # -- pausing/resuming the fleet is a genuine write there, not a
+    # discarded one. See this task's report.
+    me = client_demo.get("/api/auth/me").json()
     r = client_demo.post("/api/agents/pause")
-    assert r.json() == {"demo": True, "persisted": False}
+    assert r.status_code == 200 and r.json()["paused"] is True
+    r2 = client_demo.post("/api/agents/resume")
+    assert r2.json()["paused"] is False
+    assert client_demo.get("/api/agents").json()["paused"] is False
+    assert me["workspace_id"].startswith("ws_demo_")
 
 
 # --- policy -------------------------------------------------------------

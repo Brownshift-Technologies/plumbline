@@ -119,6 +119,17 @@ class FakeDoc:
             transaction.record_read(self._path, self._client.version(self._path))
         return FakeSnapshot(self._client.data.get(self._path), self._path.split("/")[-1])
 
+    def delete(self) -> None:
+        # A real delete -- see `core.store.Store.delete`'s own docstring for
+        # why this exists at all (a demo sandbox workspace, unlike every
+        # other collection in this codebase, is not a record worth
+        # tombstoning). Popping the key outright, not setting it to `None`
+        # the way a tombstoned row would: `FakeCollection.stream` filters on
+        # `self._client.data.items()`, so a popped key is genuinely absent
+        # from any future query, exactly like a deleted real document.
+        self._client.data.pop(self._path, None)
+        self._client.bump_version(self._path)
+
 
 class FakeCollection:
     def __init__(self, client, name, filters=(), order_field=None, limit_n=None, after_value=None):
@@ -191,6 +202,26 @@ class FakeCollection:
         if self._limit_n is not None:
             rows = rows[: self._limit_n]
         return [FakeSnapshot(value, doc_id) for doc_id, value in rows]
+
+
+class FakeBatch:
+    """The smallest thing `core.store.Store.put_many`/`delete_many` need:
+    real Firestore's `WriteBatch` is fire-and-forget until `.commit()`, but
+    this fake has no network round trip to defer, so `.set()`/`.delete()`
+    apply immediately and `.commit()` is a no-op kept only for signature
+    compatibility with the real client."""
+
+    def __init__(self, client):
+        self._client = client
+
+    def set(self, doc: FakeDoc, data: dict) -> None:
+        doc.set(data)
+
+    def delete(self, doc: FakeDoc) -> None:
+        doc.delete()
+
+    def commit(self) -> list:
+        return []
 
 
 _TRANSACTION_IDS = itertools.count(1)
@@ -276,3 +307,6 @@ class FakeFirestore:
 
     def transaction(self, max_attempts=5) -> FakeTransaction:
         return FakeTransaction(self, max_attempts)
+
+    def batch(self) -> FakeBatch:
+        return FakeBatch(self)

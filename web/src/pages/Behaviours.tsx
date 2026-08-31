@@ -131,7 +131,7 @@ export function Behaviours() {
         ? await api.patch(`/behaviours/${draft.id}`, body)
         : await api.post("/behaviours", body);
       if (isDemoWrite(res)) {
-        show(demoWriteMessage(draft.id ? "this behaviour would be updated" : "this behaviour would be created"));
+        show(demoWriteMessage(res, draft.id ? "this behaviour would be updated" : "this behaviour would be created"));
       } else {
         show(draft.id ? "Behaviour updated." : "Behaviour created.");
       }
@@ -147,7 +147,7 @@ export function Behaviours() {
   async function onDelete(b: Behaviour) {
     try {
       const res = await api.del(`/behaviours/${b.id}`);
-      show(isDemoWrite(res) ? demoWriteMessage("this behaviour would be deleted") : "Behaviour deleted.");
+      show(isDemoWrite(res) ? demoWriteMessage(res, "this behaviour would be deleted") : "Behaviour deleted.");
       list.reload();
     } catch (err) {
       show(err instanceof Error ? err.message : "Couldn't delete this behaviour.");

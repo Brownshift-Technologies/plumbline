@@ -61,6 +61,11 @@ def test_changing_to_an_unknown_plan_is_400(client_as_owner):
     assert r.status_code == 400
 
 
-def test_a_demo_session_change_plan_is_a_no_op(client_demo):
+def test_a_demo_session_change_plan_is_refused_with_a_reason(client_demo):
+    # Billing/payment stays refused even in a demo session's own sandbox
+    # -- see this task's report's "must stay refused" list -- but with a
+    # reason explaining why, not the old bare "nothing was saved".
     r = client_demo.post("/api/billing/plan", json={"plan": "scale"})
-    assert r.json() == {"demo": True, "persisted": False}
+    body = r.json()
+    assert body["demo"] is True and body["persisted"] is False
+    assert body["reason"]

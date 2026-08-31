@@ -33,7 +33,7 @@ function PasswordForm() {
     setSaving(true);
     try {
       const res = await api.post("/auth/password", { current, new: next });
-      show(isDemoWrite(res) ? demoWriteMessage("your password would be updated") : "Password updated. Other sessions signed out.");
+      show(isDemoWrite(res) ? demoWriteMessage(res, "your password would be updated") : "Password updated. Other sessions signed out.");
       setCurrent("");
       setNext("");
       setConfirm("");
@@ -98,7 +98,7 @@ function TotpSection({ user }: { user: AsyncState<CurrentUser> }) {
     try {
       const res = await api.post("/auth/totp/verify", { code });
       if (isDemoWrite(res)) {
-        show(demoWriteMessage("two-factor authentication would be enabled"));
+        show(demoWriteMessage(res, "two-factor authentication would be enabled"));
       } else {
         show("Two-factor authentication enabled.");
       }
@@ -116,7 +116,7 @@ function TotpSection({ user }: { user: AsyncState<CurrentUser> }) {
     setRemoving(true);
     try {
       const res = await api.del("/auth/totp", { code: removeCode });
-      show(isDemoWrite(res) ? demoWriteMessage("two-factor authentication would be removed") : "Two-factor authentication removed.");
+      show(isDemoWrite(res) ? demoWriteMessage(res, "two-factor authentication would be removed") : "Two-factor authentication removed.");
       setRemoveCode("");
       user.reload();
     } catch (err) {
@@ -199,7 +199,7 @@ function SessionsSection() {
   async function signOut(id: string, label: string) {
     try {
       const res = await api.del(`/auth/sessions/${id}`);
-      show(isDemoWrite(res) ? demoWriteMessage(`${label} would be signed out`) : `Signed out of ${label}`);
+      show(isDemoWrite(res) ? demoWriteMessage(res, `${label} would be signed out`) : `Signed out of ${label}`);
       sessions.reload();
     } catch (err) {
       show(err instanceof Error ? err.message : "Couldn't sign that session out.");
@@ -210,7 +210,7 @@ function SessionsSection() {
     const others = rows.filter((s) => !s.current);
     const results = await Promise.allSettled(others.map((s) => api.del(`/auth/sessions/${s.id}`)));
     const anyDemo = results.some((r) => r.status === "fulfilled" && isDemoWrite(r.value));
-    show(anyDemo ? demoWriteMessage("every other session would be signed out") : "Signed out everywhere else.");
+    show(anyDemo ? demoWriteMessage(undefined, "every other session would be signed out") : "Signed out everywhere else.");
     sessions.reload();
   }
 

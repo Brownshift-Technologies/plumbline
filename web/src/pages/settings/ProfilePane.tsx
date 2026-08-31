@@ -36,7 +36,7 @@ export function ProfilePane({ user }: { user: AsyncState<CurrentUser> }) {
     form.append("photo", file);
     try {
       const res = await api.post("/auth/photo", form);
-      show(isDemoWrite(res) ? demoWriteMessage("this photo would be uploaded") : "Photo updated.");
+      show(isDemoWrite(res) ? demoWriteMessage(res, "this photo would be uploaded") : "Photo updated.");
       user.reload();
     } catch (err) {
       show(
@@ -52,7 +52,7 @@ export function ProfilePane({ user }: { user: AsyncState<CurrentUser> }) {
   async function onRemovePhoto() {
     try {
       const res = await api.del("/auth/photo");
-      show(isDemoWrite(res) ? demoWriteMessage("this photo would be removed") : "Photo removed.");
+      show(isDemoWrite(res) ? demoWriteMessage(res, "this photo would be removed") : "Photo removed.");
       user.reload();
     } catch (err) {
       show(
@@ -70,7 +70,7 @@ export function ProfilePane({ user }: { user: AsyncState<CurrentUser> }) {
     setSaving(true);
     try {
       const res = await api.patch("/auth/me", { name, email });
-      show(isDemoWrite(res) ? demoWriteMessage("your profile would be saved") : "Profile saved");
+      show(isDemoWrite(res) ? demoWriteMessage(res, "your profile would be saved") : "Profile saved");
       user.reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't save your profile.");

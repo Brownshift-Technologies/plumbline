@@ -93,8 +93,10 @@ def _is_paused(repo, workspace_id: str) -> bool:
 
 
 def _set_paused(request: Request, sess, paused: bool) -> dict:
-    if sess.is_demo:
-        return {"demo": True, "persisted": False}
+    # A demo session pauses/resumes its OWN sandbox workspace's fleet --
+    # a real write, same as a real session's -- see this task's report on
+    # why every demo session now gets a per-session workspace it can
+    # actually write to.
     repo = request.app.state.repo
     workspace = repo.workspace(sess.workspace_id)
     if workspace is None:
@@ -173,8 +175,8 @@ def put_policy_rules(
     body: RulesBody, request: Request, sess=Depends(current_session),
     _role=Depends(require_write_role("owner")),
 ):
-    if sess.is_demo:
-        return {"demo": True, "persisted": False}
+    # Editing gate rules is a real write in a demo session's own sandbox
+    # too -- see `_set_paused` above.
     _validate_rules(body.rules)
 
     repo, ledger = request.app.state.repo, request.app.state.ledger

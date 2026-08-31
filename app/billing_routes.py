@@ -38,7 +38,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from app.deps import current_session, require_write_role
+from app.deps import current_session, demo_refusal, require_write_role
 
 router = APIRouter(prefix="/api/billing")
 
@@ -91,7 +91,10 @@ def change_plan(
     _role=Depends(require_write_role("owner")),
 ):
     if sess.is_demo:
-        return {"demo": True, "persisted": False}
+        # Billing and payment reach a real payment provider this codebase
+        # does not run for a sandbox -- see this task's report for the
+        # full "must stay refused" list.
+        return demo_refusal("Billing changes need a real account -- the demo doesn't handle payment.")
     if body.plan not in _PLAN_CATALOGUE:
         raise HTTPException(400, f"no such plan {body.plan!r} -- choose one of {sorted(_PLAN_CATALOGUE)}")
 

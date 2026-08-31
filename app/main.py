@@ -146,40 +146,86 @@ def _bootstrap_workspace(user: User) -> Workspace:
     )
 
 
-def _seed_demo_if_missing_factory(config: PlumblineConfig, repo: Repo):
-    """Build the `seed_demo_if_missing` closure stored on `app.state`.
+def _seed_demo_workspace_factory(config: PlumblineConfig, repo: Repo):
+    """Build the `seed_demo_workspace` closure stored on `app.state`.
 
-    `seed/demo.py` (Task 15) does not exist yet -- this is a forward
-    dependency, not a bug: this task owns the demo *entry point*
-    (`POST /api/auth/demo`), Task 15 owns the demo *data*. Rather than
-    have `app/auth_routes.py` import `seed.demo` directly (which would
-    make every test importing `app.auth_routes` fail at collection until
-    Task 15 lands -- the worst outcome for a module ~40 downstream tests
-    depend on), the import is attempted lazily, inside the closure, only
-    when a demo session is actually requested. Until Task 15 ships this
-    is a no-op: `POST /api/auth/demo` still issues a real, working
-    session (`SessionService.issue` only needs `config.demo_workspace_id`,
-    a plain string -- it does not require the workspace to already have a
-    Firestore row), it is simply against a workspace with nothing seeded
-    in it yet. Once `seed.demo.seed_demo(repo, config) -> Workspace`
-    exists, this starts calling it on every demo entry, and `seed_demo`
-    is documented (Task 15's own brief) to be idempotent, so calling it
-    once per demo session is the intended usage, not wasted work.
+    **Every demo session gets its own sandbox now, not one shared,
+    read-only workspace.** Before this task, `POST /api/auth/demo` seeded
+    one fixed `config.demo_workspace_id` and every visitor's writes were
+    discarded server-side with an honest banner -- correct against the
+    original spec, and useless as a demo: a judge could look but never
+    touch. `seed_demo_workspace(workspace_id)` seeds a FRESH copy of the
+    fixture into whichever id the caller (`app/auth_routes.py`'s `demo()`)
+    just minted, so that session's writes land somewhere real and nobody
+    else's session can see them.
+
+    The `seed.demo` import stays deferred, inside the closure, for the
+    same reason it always was: importing `app.auth_routes` must not
+    require `seed/demo.py` to exist for the ~40 unrelated tests that
+    import that module transitively.
     """
 
-    def seed_demo_if_missing() -> None:
+    def seed_demo_workspace(workspace_id: str) -> None:
         try:
             from seed.demo import seed_demo
         except ImportError:
             log_event(
                 "demo.seed_not_available",
                 severity="INFO",
-                detail="seed.demo is a Task 15 forward dependency; demo entry proceeds unseeded",
+                detail="seed.demo could not be imported; demo entry proceeds unseeded",
             )
             return
-        seed_demo(repo, config)
+        seed_demo(repo, config, workspace_id)
 
-    return seed_demo_if_missing
+    return seed_demo_workspace
+
+
+def _sweep_expired_demo_workspaces_factory(repo: Repo):
+    """Build the `sweep_expired_demo_workspaces` closure stored on
+    `app.state`.
+
+    **Chosen: an opportunistic, bounded sweep on the demo-entry hot path,
+    not a `DELETE` route or a separate cron job.** A per-workspace
+    `DELETE /api/auth/demo/{workspace_id}` fired on session expiry would
+    need a client that is still alive at the 2-hour mark to fire it --
+    exactly the visitor least likely to still have a tab open -- so
+    abandoned sandboxes would accumulate regardless. A real Cloud
+    Scheduler job is the textbook answer, but it is new infrastructure
+    (a schedule, a service account, a second entry point to deploy and
+    monitor) for a problem this codebase can already solve on a path that
+    runs constantly anyway: every `POST /api/auth/demo`. So this sweep
+    runs there instead (see `app/auth_routes.py`'s `demo()`), using
+    `Workspace.created_at` (added for exactly this) plus
+    `app.sessions.DEMO_TTL_SECONDS` to find sandboxes whose 2-hour window
+    has passed.
+
+    **Bounded, so it cannot reintroduce the seeding-latency problem this
+    task exists to avoid.** `limit` caps how many expired workspaces one
+    call deletes (default 5) -- a demo visitor's own `POST /api/auth/demo`
+    must stay fast (this task's own "do not let the demo door get slower
+    than 6.9s warm" constraint) even if hundreds of sandboxes are sitting
+    expired; a bounded sweep pays a small, constant cost per demo entry
+    and drains a backlog over several entries rather than blocking one
+    caller with all of it. `demo_workspaces()` is a single-field Firestore
+    query (`is_demo == True`); the `created_at` cutoff is applied in
+    Python rather than as a second query field, matching `Repo.
+    demo_workspaces`'s own docstring on why (no composite index to
+    provision for what is, in practice, a small collection).
+    """
+    from app.sessions import DEMO_TTL_SECONDS
+
+    def sweep_expired_demo_workspaces(now: float | None = None, limit: int = 5) -> int:
+        import time as _time
+
+        cutoff = (now if now is not None else _time.time()) - DEMO_TTL_SECONDS
+        expired = [w for w in repo.demo_workspaces() if w.created_at < cutoff]
+        deleted = 0
+        for workspace in expired[:limit]:
+            repo.delete_workspace_cascade(workspace.id)
+            deleted += 1
+        return deleted
+
+    return sweep_expired_demo_workspaces
 
 
 def _deliver_reset_email_default(email: str, token: str) -> None:
@@ -253,7 +299,14 @@ def build_app(config: PlumblineConfig | None = None, repo: Repo | None = None) -
     app.state.ledger = ledger
     app.state.gateway = Gateway(rp, app.state.ledger)
     app.state.bootstrap_workspace = _bootstrap_workspace
-    app.state.seed_demo_if_missing = _seed_demo_if_missing_factory(cfg, rp)
+    app.state.seed_demo_workspace = _seed_demo_workspace_factory(cfg, rp)
+    app.state.sweep_expired_demo_workspaces = _sweep_expired_demo_workspaces_factory(rp)
+    # Real pacing in production, instant in tests -- the same "tests turn
+    # it down" pattern `app/run_routes.py`'s `sse_poll_seconds`/
+    # `sse_heartbeat_seconds` already use, just decided once here instead
+    # of per-test, since every test that triggers a simulated demo run
+    # needs it fast and none needs it realistic.
+    app.state.demo_run_step_seconds = 0.0 if deploy_env == "test" else 1.4
     app.state.oauth_state_secret = cfg.oauth_state_secret or _INSECURE_DEV_OAUTH_SECRET
     # dict, not a fixed tuple of providers, so tests can add a "fake" entry
     # (`app.state.oauth_providers["fake"] = FakeProvider(...)`) without

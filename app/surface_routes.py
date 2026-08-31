@@ -16,7 +16,7 @@ one function).
 from fastapi import APIRouter, Depends, Request
 
 from app.deps import current_session, require_write_role
-from app.run_routes import enqueue_run
+from app.run_routes import enqueue_run, simulate_run
 
 router = APIRouter(prefix="/api/surface")
 
@@ -45,7 +45,9 @@ def remap_surface(
     request: Request, sess=Depends(current_session),
     _role=Depends(require_write_role("owner")),
 ):
-    if sess.is_demo:
-        return {"demo": True, "persisted": False}
-    run = enqueue_run(request, sess, trigger="remap")
+    # A demo session's remap is a simulated run in its own sandbox -- see
+    # app/run_routes.py's simulate_run docstring for why "remap" (a run
+    # whose trigger says why it started, per this module's own docstring)
+    # gets the identical demo/real split `POST /api/runs` does.
+    run = simulate_run(request, sess, trigger="remap") if sess.is_demo else enqueue_run(request, sess, trigger="remap")
     return {"run_id": run.id, "number": run.number, "state": run.state}

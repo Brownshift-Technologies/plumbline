@@ -90,12 +90,18 @@ def test_events_endpoint_is_still_inherited_and_acks(client):
     assert r.status_code == 204
 
 
-def test_seed_demo_if_missing_is_a_noop_when_seed_module_is_absent(client):
-    # Task 15 (seed/demo.py) has not landed yet in this codebase. Calling
-    # the hook directly must not raise -- it is documented as a no-op with
-    # a clear TODO in that case, not a crash waiting to happen the moment
-    # POST /api/auth/demo is hit.
-    client.app.state.seed_demo_if_missing()  # must not raise
+def test_seed_demo_workspace_is_a_noop_when_seed_module_is_absent(client, monkeypatch):
+    # seed/demo.py exists in this codebase now, but `_seed_demo_workspace_
+    # factory`'s deferred `from seed.demo import seed_demo` is still
+    # written to degrade to a logged no-op rather than a crash if that
+    # import ever fails -- exercised here the same way any "module not
+    # found" case is: setting the module to `None` in `sys.modules` makes
+    # a subsequent `import` raise `ImportError`, exactly like a genuinely
+    # missing module would.
+    import sys
+
+    monkeypatch.setitem(sys.modules, "seed.demo", None)
+    client.app.state.seed_demo_workspace("ws_demo_test")  # must not raise
 
 
 # --- fix round 1: OAUTH_STATE_SECRET must be enforced, not merely documented -

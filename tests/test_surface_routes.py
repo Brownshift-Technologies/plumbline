@@ -50,7 +50,9 @@ def test_remapping_enqueues_a_run(client_as_owner, stub_enqueue):
     assert stub_enqueue == [("plumbline-worker", {"PLUMBLINE_RUN_ID": body["run_id"]})]
 
 
-def test_a_demo_session_remap_is_a_no_op(client_demo, stub_enqueue):
+def test_a_demo_session_remap_simulates_a_run_in_its_own_sandbox(client_demo, stub_enqueue):
     r = client_demo.post("/api/surface/remap")
-    assert r.json() == {"demo": True, "persisted": False}
+    assert r.status_code == 200
+    body = r.json()
+    assert body["run_id"] and body["state"] == "running" and "demo" not in body
     assert stub_enqueue == []
