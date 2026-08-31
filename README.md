@@ -12,7 +12,10 @@ Enterprise Fleet**, also entered for **Startup Excellence**.
 ## Try it
 
 **https://plumbline-api-cxotjai2ta-uc.a.run.app** — click **Open the live demo**. No
-account, no Google sign-in, nothing to install.
+account, no Google sign-in, nothing to install. (Cloud Run scales to zero, so the first
+request after an idle period takes ~15s; after that it's ~2s.)
+
+Repository: https://github.com/rogerkoranteng-crypto/plumbline
 
 The demo issues a real session against a *per-session sandbox*: your own workspace, seeded
 with routes, runs, findings and a patch waiting at an approval gate. It is writable — create

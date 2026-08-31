@@ -1,103 +1,152 @@
-# Demo script — ≤ 4 minutes
+# Demo script — 3 minutes
 
-Structure: the friction (what's broken about testing today), the value (what Plumbline does
-about it), then the demo — ending on the strongest beat in the product: a failing run
-produces a real pull request that the agent that wrote it **cannot merge**.
+Every label, button and keystroke below was read off the deployed app on 2026-08-31. If a
+label here does not match what you see, the app changed and this file is stale — fix this
+file, don't improvise on camera.
 
-Record against the deployed Cloud Run service, not a local server — the Google Cloud proof
-shot below is a **Stage One pass/fail requirement** for this hackathon and has to be real.
+**Live URL:** https://plumbline-api-cxotjai2ta-uc.a.run.app
+**Repo:** https://github.com/rogerkoranteng-crypto/plumbline
 
 ---
 
-## 0:00–0:30 — The friction
+## Before you hit record
 
-> "Every team that ships fast has the same three problems with testing. Someone has to write
-> the tests, by hand, against a UI that changes every sprint — so the suite rots faster than
-> anyone can fix it. Nobody tests the failure paths, because writing a test for 'what happens
-> when the payment API times out' is tedious and gets skipped. And when something breaks in
-> production, root-causing it and getting a safe fix reviewed takes hours somebody doesn't have."
+1. **Warm the service.** Cloud Run scales to zero; the first request after an idle period
+   takes ~15s, warm it's ~2s. Load the URL once and click through Home → Runs → Findings,
+   then reload. Do this within a couple of minutes of recording.
+2. **Hard-refresh** (`Ctrl+Shift+R`) so you are on the current bundle.
+3. **Open the live demo once before recording** and leave that tab open. Your sandbox now
+   persists, so the run you start in step 4 will still be there if you need a second take.
+4. Have three tabs ready: **(A)** the app, **(B)** Cloud Run console, **(C)** Cloud Logging
+   filtered to `aiplatform.googleapis.com`.
+5. Browser at 1440×900. Zoom 100%. Hide bookmarks bar.
 
-Show, briefly, a real flaky-test complaint or a red CI run — anything that visually says
-"this is the status quo."
+**One honesty note.** Demo-sandbox runs are *replayed from a seeded fixture* — the run page
+says so on screen, in a grey line under the header. Do not say "this is executing against a
+live app right now" over that screen. What is genuinely real, and what you should say: the
+agents, the Gateway, the policy decisions, the hash-chained ledger, the approval gate, and
+the Vertex AI calls. Real spec execution against a customer's own app requires connecting a
+GitHub repo, which is a Settings pane that does not exist yet.
 
-## 0:30–1:05 — The value
+---
 
-> "Plumbline is a fleet of eleven agents that do this instead of a person. One maps your app.
-> One turns plain English into a Playwright test. One repairs a test's selectors when your UI
-> changes, without ever touching what it actually asserts. One breaks your app on purpose —
-> latency, faults, toxic input — because that's the coverage nobody writes by hand. One runs
-> everything, deterministically, with **no model in the execution loop** — a bug you can't
-> reproduce isn't a bug report, it's a rumor. One root-causes a failure and reproduces it five
-> times before calling it a bug instead of a flake. And when it finds something real, one
-> proposes the fix and opens a pull request — then stops, because merging a patch to a
-> payments file is not something an agent gets to decide alone."
+## 0:00–0:25 — The friction
 
-Cut to the surface map or the fleet screen — eleven agent tiles, visibly distinct jobs.
+> "Every team that ships fast has the same three problems with testing. Someone writes the
+> tests by hand, against a UI that changes every sprint, so the suite rots faster than anyone
+> can fix it. Nobody tests the failure paths, because writing a test for 'what happens when
+> the payment API times out' is tedious and gets skipped. And when something does break,
+> root-causing it and getting a safe fix reviewed takes hours nobody has."
 
-## 1:05–1:30 — Google Cloud proof shot (Stage One)
+## 0:25–0:50 — What it is
 
-Non-negotiable, shown plainly, no narration needed beyond naming what's on screen:
+> "Plumbline is a fleet of eleven agents that does that work instead. One maps your app. One
+> turns plain English into a Playwright test. One repairs selectors when your UI drifts,
+> without touching what the test asserts. One breaks your app on purpose. One runs everything
+> with **no model in the execution loop** — a bug you can't reproduce isn't a bug report,
+> it's a rumour. One root-causes the failure. And one proposes the fix and opens a pull
+> request — then stops."
 
-1. The Cloud Run console: `plumbline-api` and the `plumbline-worker` job, both **green**,
-   in `us-central1`.
-2. The service's real `https://plumbline-api-<hash>-uc.a.run.app` URL — paste it into the
-   address bar on screen, load `/_health`, show the JSON response
-   (`{"ok": true, "model": "gemini-3.5-flash", "gemini_location": "global", ...}`).
-3. Vertex AI request logs (Cloud Logging, filtered to `aiplatform.googleapis.com`, `global`
-   location) showing real `gemini-3.5-flash` calls from the run about to be demoed.
+**Click** `Agents` in the left nav. Eleven tiles, each with its own tool scope.
 
-> "This is running on Cloud Run right now — the API scales to zero when idle, the worker is a
-> Cloud Run Job that spins up one execution per run, and every model call goes to Vertex AI's
-> `gemini-3.5-flash`, on its `global` endpoint, which is the only place that model is served."
+## 0:50–1:15 — Google Cloud proof shot (Stage One requirement)
 
-## 1:30–3:35 — The demo
+Tab B, then tab C, then back. Say what is on screen, nothing more:
 
-**1:30** Open the deployed URL. Click **open the live demo** — no Google account needed, a
-fresh seeded workspace every time.
+1. **Cloud Run console** — `plumbline-api` (service) and `plumbline-worker` (job), both
+   green, `us-central1`.
+2. **Paste** `https://plumbline-api-cxotjai2ta-uc.a.run.app/_health` into the address bar and
+   **press Enter**. Show the JSON:
+   `{"ok":true,"model":"gemini-3.5-flash","gemini_location":"global","service":"plumbline-api"}`
+3. **Cloud Logging**, filtered to `aiplatform.googleapis.com` — real `gemini-3.5-flash` calls.
 
-**1:45** Land on Home. Point at the run history, the findings count, the fleet status —
-"eighteen runs, seven findings, one waiting on a human right now."
+> "This runs on Cloud Run. The API scales to zero. The worker is a Cloud Run Job, one
+> execution per run. Every model call goes to Vertex AI's gemini-3.5-flash on the global
+> endpoint — the only place that model is served."
 
-**2:00** Open the surface map — the route graph Cartographer built. "It found this by
-crawling the app, not by reading a sitemap someone maintained by hand."
+## 1:15–1:35 — The demo door
 
-**2:15** Open Runs, click into the run that found the checkout bug. Let the step list play —
-Chaos injecting 240ms of latency on the payments API, Runner seeing two charges instead of
-one, Triager reproducing it five times out of five and ruling it a real bug, not a flake.
-Point at the ledger entry each step is writing as it happens.
+**Go to tab A.** If you are already signed in, that's fine — otherwise **click**
+`Open the live demo` on the sign-in screen.
 
-**2:50** Open the finding — click the row on **Findings**, it goes straight to the run.
-Show the patch: Surgeon's diff, the pull request link, and the gate state — **awaiting
-approval**. Say the line that matters: the fleet wrote this patch, verified it, and then
-*stopped*. It cannot merge it. Nothing in the eleven agents' tool scopes contains
-`pr.merge`.
+> "No account, no Google sign-in. Every visitor gets their own sandbox, and it's still there
+> when they come back."
 
-**3:10** Approve it yourself, in the demo. The patch goes from blocked to merged and the
-ledger records who did it — a human, not an agent, made the call that mattered. (For the
-RBAC half: a real workspace's reader sees the same button disabled with the actual reason
-shown, "payments/* requires an owner's approval", not greyed out silently. `patch.spec.ts`
-asserts both roles.)
+**Point at** the blue banner: *"This is your own live sandbox — everything you do here really
+works, and it's still here when you come back."*
 
-**3:25** One more screen: the audit ledger, filtered to this run. "Every decision the Gateway
-made — allowed, blocked, gated — is right here, signed, in order, and nobody can quietly edit
-it afterward."
+## 1:35–1:55 — Plain English in, a test out
 
-## 3:35–4:00 — Close
+**Click** the box under *"Good afternoon, Demo. What should we put under test?"*
 
-> "Eleven agents, one gate every one of them has to pass through, and a human signing off
+**Type exactly:**
+
+```
+A customer who retries a slow payment should only be charged once
+```
+
+**Press** the blue **↑** button to the right of the box (or `Enter`).
+
+The app navigates to a new run. Agent steps stream in one at a time — Cartographer, Author,
+Runner, Triager.
+
+> "That's plain English. Author turns it into a Playwright spec, Runner executes it, and every
+> step you're watching arrive is being written to an append-only ledger as it happens."
+
+## 1:55–2:20 — The failure that nobody would have written by hand
+
+**Click** `Findings` in the left nav. **Click** the row
+*"A retried payment charges the customer twice."*
+
+That opens **Run 4471**. **Point at** the step list:
+
+- Chaos injecting latency on the payments API
+- Runner seeing two charges instead of one
+- Triager: **Reproduced 5 of 5** — a bug, not a flake
+
+> "Nobody wrote this test. Chaos went looking for it — that's the coverage teams skip. And
+> Triager reproduced it five times out of five before it was willing to call it a bug."
+
+## 2:20–2:50 — The beat the whole product is built around
+
+Still on Run 4471. **Point at**, in order:
+
+1. **Blocked at a gate**
+2. *"Policy will not let an agent merge anything under payments/*."*
+3. Surgeon's diff and **Pull request #2211**
+4. The last step: *"Surgeon opened the pull request and stopped"*
+
+> "The fleet found the bug, wrote the patch, verified it, opened the pull request — and
+> stopped. It cannot merge this. No agent in the fleet has `pr.merge` in its tool scope. Not
+> a prompt asking it not to. It isn't in the scope, and the Gateway checks the scope on every
+> single call."
+
+**Click** `Approve and merge`.
+
+> "A human makes that call. And the ledger records who did."
+
+## 2:50–3:00 — Close
+
+**Click** `Audit ledger` in the left nav, then **click** `Verify chain`.
+
+Show `intact: true`.
+
+> "Every decision the Gateway made — allowed, blocked, gated — hash-chained, in order, and
+> tamper-evident. Eleven agents, one gate they all pass through, and a human signing off
 > before anything real changes. That's Plumbline."
 
-Show the URL on screen one more time. End.
+Leave the URL on screen. End.
 
 ---
 
-## Recording notes
+## If you have 30 seconds spare (optional B-roll)
 
-- Keep the browser at the deployed URL throughout section 2 onward — the demo workspace's
-  writes are accepted in the UI and discarded server-side (an honest banner says so), so
-  nothing in the recording depends on a specific prior state persisting.
-- If a live run needs to be triggered fresh for the recording rather than replayed from the
-  seeded history, expect it to take real wall-clock minutes — Cartographer, Author, Runner
-  and Triager each make a real Vertex AI call and Runner drives a real Playwright browser.
-  Pre-run it once before recording and cut to the finished run rather than watching it live,
-  or use the seeded gated-patch fixture, which is already there the moment the demo opens.
+- `Surface map` → the route graph Cartographer built by crawling, plus the
+  **Write the 2 missing** button.
+- `Policy & gates` → the rules that produced the block you just showed.
+- `Settings → Billing`, `Members`, `Security` → it's a product, not a demo.
+
+## Fallback if a live run misbehaves on camera
+
+Run 4471 is seeded and present the moment the demo opens — it needs no run to be started
+first. Skip section 1:35 and go straight to Findings.
