@@ -28,6 +28,9 @@ itself, the same way `tests/conftest.py`'s `_member` does for the HTTP
 route tests.
 """
 
+import pathlib
+import tempfile
+
 from agents.base import AgentContext
 from agents.browser import FakeBrowser
 from app.repo import Repo
@@ -35,6 +38,7 @@ from app.settings import PlumblineConfig
 from core.fakes import FakeFirestore, FakeModel
 from gateway.gateway import Gateway
 from gateway.ledger import Ledger
+from job.checkout import RepoCheckout
 
 # Matches `tests/conftest.py`'s `config` fixture field-for-field. Not
 # imported from there: `tests/conftest.py` is pytest's fixture module, not
@@ -50,6 +54,27 @@ _CONFIG = PlumblineConfig(
 )
 
 
+def make_checkout(files: dict[str, str] | None = None, **kwargs) -> RepoCheckout:
+    """Tier 2: a plain, disk-backed `RepoCheckout` with no real git remote
+    -- enough for Author's and Healer's own tests, which only ever call
+    `read_file`/`write_file`/`list_specs` on `ctx.checkout`, never
+    `branch`/`commit_all`/`push` (only Surgeon does that, and its own
+    tests build a full `RepoCheckout.clone(...)` against a real local
+    bare repository -- see `tests/test_surgeon.py` and
+    `tests/test_checkout.py`, which owns the git-plumbing tests
+    themselves). Built via the plain constructor, not `clone()` --
+    nothing here needs a network, a remote, or even a `.git` directory at
+    all. Not cleaned up automatically: this is test scratch, the same
+    trade `tests/agent_fixtures.py`'s own `make_ctx` already makes for a
+    fresh `FakeFirestore` per call.
+    """
+    root = pathlib.Path(tempfile.mkdtemp(prefix="plumbline-test-checkout-"))
+    checkout = RepoCheckout(root, repo_full_name="acme/storefront", default_branch="main", **kwargs)
+    for path, content in (files or {}).items():
+        checkout.write_file(path, content)
+    return checkout
+
+
 def make_ctx(
     *,
     pages: dict | None = None,
@@ -59,6 +84,7 @@ def make_ctx(
     workspace_id: str = "ws1",
     run_id: str = "r1",
     repo: Repo | None = None,
+    checkout: RepoCheckout | None = None,
 ) -> AgentContext:
     """Build an `AgentContext` wired to fakes throughout. Every agent test
     uses this, directly or through its own `ctx_*` fixture.
@@ -98,4 +124,5 @@ def make_ctx(
         repo=active_repo,
         browsers={name: FakeBrowser(env_pages, spec_results)
                   for name, env_pages in (browsers or {}).items()},
+        checkout=checkout,
     )

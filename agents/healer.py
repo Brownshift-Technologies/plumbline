@@ -115,6 +115,21 @@ class Healer:
     name = "healer"
 
     def run(self, ctx) -> AgentResult:
+        # Tier 2 (2026-08-30): a real repair edits a real file. See
+        # `agents/author.py`'s identical guard and `job/checkout.py`'s own
+        # module docstring -- the fleet-wide rule is the same for both:
+        # no connected repo means no real file to touch, so Healer skips
+        # outright with an explanatory step rather than crash.
+        if ctx.checkout is None:
+            return AgentResult(
+                summary="Healer skipped -- no repository connected",
+                detail="This workspace has no connected GitHub repository, so there is "
+                       "nowhere to write a real repair. Connect a repository "
+                       "(Settings > GitHub) to let Healer repair drifted selectors.",
+                outcome="skipped",
+                data={"repaired": 0, "abandoned": []},
+            )
+
         specs = [
             (b.spec_path, b.route)
             for b in ctx.repo.behaviours_for_workspace(ctx.workspace_id)
@@ -158,12 +173,24 @@ class Healer:
                     abandoned.append(_spec_id(c["spec_path"]))
                     continue
 
+                # The draft goes onto the real checkout file BEFORE
+                # verification -- a real `PlaywrightDriver` (cwd= the
+                # checkout) executes whatever is actually on disk, not
+                # the string this function is holding in memory.
+                ctx.checkout.write_file(c["spec_path"], new_content)
+
                 verify = ctx.browser.run_spec(c["spec_path"])
                 if verify.get("passed"):
                     repaired.append((c["spec_path"], new_content))
                 else:
-                    # Reverted: nothing is written for this spec, and it
-                    # is reported rather than silently dropped.
+                    # Verify-and-revert: the draft is put back to its
+                    # ORIGINAL content on disk, not left half-applied --
+                    # a repair that does not turn the failure green must
+                    # never survive on the checkout, any more than it
+                    # survives in Firestore (nothing is written for this
+                    # spec below either). Reported in `abandoned`, not
+                    # silently dropped.
+                    ctx.checkout.write_file(c["spec_path"], c["content"])
                     abandoned.append(_spec_id(c["spec_path"]))
             return repaired, abandoned
 

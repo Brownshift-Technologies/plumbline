@@ -126,6 +126,18 @@ class AgentContext:
     browser: object
     repo: object
     browsers: dict = field(default_factory=dict)
+    # Tier 2 (2026-08-30): a `job.checkout.RepoCheckout` for the
+    # workspace's connected repo, or `None` when no repo is connected (a
+    # demo sandbox, or a real workspace that has not connected one yet).
+    # `None` is not an error state -- `agents/author.py`, `agents/healer.py`,
+    # and `agents/surgeon.py` all check it explicitly and skip with an
+    # explanatory step rather than crash, per the fleet-wide rule that
+    # every agent either runs or explains why it did not. Typed `object`
+    # like every other field here rather than importing `RepoCheckout`
+    # (this module stays shapes-only -- see the class docstring above),
+    # deliberately `| None` anyway so the type itself documents the one
+    # value every reader of this field has to handle.
+    checkout: object | None = None
 
 
 class Agent(Protocol):

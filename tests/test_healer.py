@@ -11,7 +11,9 @@ import pytest
 from app.models import Behaviour, Workspace
 from agents.healer import Healer
 from gateway.gateway import GatewayError
-from tests.agent_fixtures import make_ctx
+from tests.agent_fixtures import make_checkout, make_ctx
+
+_UNSET = object()  # distinguishes "no checkout= passed" from an explicit checkout=None
 
 _BROKEN_CSS = (
     "test('checkout submit', async ({ page }) => {\n"
@@ -26,11 +28,12 @@ _NEW_LOCATOR = "await page.getByRole('button', { name: 'Pay' }).click();"
 
 def _ctx_drifted(seeded_results, spec_path="specs/checkout.submit.spec.ts",
                   route="/checkout", spec_content=_BROKEN_CSS, model_responses=(_NEW_LOCATOR,),
-                  elements=({"ref": "e1", "role": "button", "name": "Pay"},)):
+                  elements=({"ref": "e1", "role": "button", "name": "Pay"},), checkout=_UNSET):
     ctx = make_ctx(
         pages={route: {"a11y": list(elements)}},
         spec_results={spec_path: seeded_results},
         model_responses=model_responses,
+        checkout=make_checkout({spec_path: spec_content}) if checkout is _UNSET else checkout,
     )
     ctx.repo.put_spec("ws1", spec_path, spec_content)
     ctx.repo.put_behaviour(Behaviour(
@@ -222,3 +225,44 @@ def test_a_gateway_block_on_the_write_surfaces_as_an_error_not_a_silent_skip():
         gate_rules=({"tool": "repo.write:specs", "pattern": "*", "effect": "deny"},)))
     with pytest.raises(GatewayError):
         Healer().run(ctx)
+
+
+# --- Tier 2 (2026-08-30): editing a real checkout file ---------------------
+
+
+def test_healer_edits_a_real_file_and_reverts_a_repair_that_does_not_hold():
+    spec_path = "specs/checkout.submit.spec.ts"
+    checkout = make_checkout({spec_path: _BROKEN_CSS})
+
+    # First: a repair that DOES hold -- the real file on disk ends up
+    # carrying the new locator line, not just the Firestore copy.
+    ctx_ok = _ctx_drifted([
+        {"passed": False, "error": "strict mode violation: locator('.btn-pay') resolved to 2 elements"},
+        {"passed": True},
+    ], checkout=checkout)
+    Healer().run(ctx_ok)
+    assert "getByRole" in checkout.read_file(spec_path)
+
+    # Then: a repair that does NOT hold -- the real file must be put back
+    # exactly as it was, not left with a half-applied edit that never
+    # verified.
+    checkout2 = make_checkout({spec_path: _BROKEN_CSS})
+    ctx_reverted = _ctx_drifted([
+        {"passed": False, "error": "strict mode violation: locator('.btn-pay') resolved to 2 elements"},
+        {"passed": False, "error": "strict mode violation: locator resolved to 2 elements"},
+    ], checkout=checkout2)
+    out = Healer().run(ctx_reverted)
+    assert out.data["abandoned"] == ["checkout.submit"]
+    assert checkout2.read_file(spec_path) == _BROKEN_CSS
+
+
+def test_healer_does_not_run_when_there_is_no_checkout():
+    ctx = _ctx_drifted([
+        {"passed": False, "error": "strict mode violation: locator('.btn-pay') resolved to 2 elements"},
+        {"passed": True},
+    ], checkout=None)
+    out = Healer().run(ctx)
+    assert out.outcome == "skipped"
+    assert out.data == {"repaired": 0, "abandoned": []}
+    assert ctx.model.calls == [], "no repo connected means no repair drafting at all"
+    assert ctx.browser.visited == [], "no repo connected means no spec even gets run"

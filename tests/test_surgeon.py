@@ -9,12 +9,68 @@ a `dict` is returned on every call, a `list` is popped one result per call
 exactly what "re-run the failing spec N times" needs.
 """
 
+import pathlib
+import subprocess
+import tempfile
+
 import pytest
 
+from agents.repo_source import FakeGitHub
 from agents.surgeon import Surgeon
 from app.models import Behaviour, Finding, Workspace
 from gateway.gateway import GatewayError
+from job.checkout import RepoCheckout
 from tests.agent_fixtures import make_ctx
+
+_UNSET = object()  # distinguishes "no checkout= passed" from an explicit checkout=None
+
+
+def _git(args, cwd):
+    subprocess.run(
+        ["git", "-c", "user.email=seed@test.local", "-c", "user.name=seed"] + args,
+        cwd=str(cwd), check=True, capture_output=True, text=True,
+    )
+
+
+def make_surgeon_checkout() -> RepoCheckout:
+    """A real local bare repository, seeded with exactly the two source
+    files this file's diff fixtures (`_GOOD_DIFF`/`_PAYMENT_DIFF`) target
+    -- so `open_pr()`'s real `branch()`/`commit_all()`/`push()` and
+    `agents.surgeon._apply_diff_to_checkout` all run against actual git
+    plumbing, entirely offline. Built without ever calling
+    `RepoCheckout.clone()` (no need to monkeypatch `job.checkout.
+    _remote_url` at all): a plain local `git clone` sets up the working
+    tree, and the constructor is handed the result directly --
+    `tests/test_checkout.py` is what owns proving `clone()` ITSELF works.
+    `github` is a `FakeGitHub`, the same offline double
+    `tests/test_github.py`/`agents/repo_source.py` already define.
+    """
+    root = pathlib.Path(tempfile.mkdtemp(prefix="plumbline-test-surgeon-"))
+    bare = root / "origin.git"
+    subprocess.run(["git", "init", "--bare", "-b", "main", str(bare)],
+                    check=True, capture_output=True, text=True)
+
+    seed = root / "seed"
+    _git(["clone", str(bare), str(seed)], cwd=root)
+    (seed / "src" / "checkout").mkdir(parents=True)
+    (seed / "src" / "checkout" / "total.ts").write_text("return price;\n")
+    (seed / "src" / "checkout" / "payment-client.ts").write_text("timeout = 1000;\n")
+    _git(["add", "-A"], cwd=seed)
+    _git(["commit", "-m", "seed"], cwd=seed)
+    _git(["push", "origin", "main"], cwd=seed)
+
+    work = root / "work"
+    _git(["clone", str(bare), str(work)], cwd=root)
+    base_sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=work,
+                               capture_output=True, text=True, check=True).stdout.strip()
+
+    checkout = RepoCheckout(
+        work, token="test-installation-token-unused",
+        github=FakeGitHub(default_branch="main"),
+        repo_full_name="acme/storefront", default_branch="main",
+    )
+    checkout._base_sha = base_sha
+    return checkout
 
 _SPEC_PATH = "specs/checkout.spec.ts"
 _SPEC_CONTENT = "test('checkout total is correct', async ({ page }) => { await page.goto('/checkout'); });"
@@ -93,7 +149,7 @@ _UNSUFFIXED_KNOWN_SPEC_DIFF = (
 def _base_ctx(
     spec_results, model_responses, *, route="/checkout", finding_id="f_catalog",
     spec_path=_SPEC_PATH, spec_content=_SPEC_CONTENT, other_results=None,
-    title="Stale tax calculation drops the surcharge",
+    title="Stale tax calculation drops the surcharge", checkout=_UNSET,
 ):
     ctx = make_ctx(
         spec_results={
@@ -101,6 +157,7 @@ def _base_ctx(
             _OTHER_SPEC_PATH: other_results if other_results is not None else {"passed": True},
         },
         model_responses=model_responses,
+        checkout=make_surgeon_checkout() if checkout is _UNSET else checkout,
     )
     ctx.repo.put_spec("ws1", spec_path, spec_content)
     ctx.repo.put_spec("ws1", _OTHER_SPEC_PATH, _OTHER_SPEC_CONTENT)
@@ -184,7 +241,12 @@ def ctx_patch_touching_an_unsuffixed_known_spec():
 
 @pytest.fixture
 def ctx_no_findings():
-    return make_ctx()
+    return make_ctx(checkout=make_surgeon_checkout())
+
+
+@pytest.fixture
+def ctx_no_checkout():
+    return _base_ctx([{"passed": True}] * 3, (_GOOD_DIFF,), checkout=None)
 
 
 @pytest.fixture
@@ -365,3 +427,91 @@ def test_it_refuses_to_draft_from_a_poisoned_finding_title(ctx_poisoned_finding_
         Surgeon().run(ctx_poisoned_finding_title)
     assert ctx_poisoned_finding_title.model.calls == [], \
         "the poisoned finding title must never reach the model"
+
+
+# --- Tier 2 (2026-08-30): a real branch, a real push, a real pull request --
+
+
+def test_surgeon_opens_a_real_pull_request_not_a_fabricated_url(ctx_catalog_finding):
+    checkout = ctx_catalog_finding.checkout
+    out = Surgeon().run(ctx_catalog_finding)
+
+    assert out.data["pr_url"] != ""
+    assert "example/repo" not in out.data["pr_url"], "the old fabricated URL must be gone"
+    assert len(checkout.github.pull_requests) == 1
+    pr = checkout.github.pull_requests[0]
+    assert pr["repo"] == "acme/storefront"
+    assert pr["default_branch"] == "main"
+    assert pr["branch"] != "main"
+    assert out.data["pr_url"] == "https://github.com/acme/storefront/pull/1"
+    # The real file on the real checkout carries the applied fix.
+    assert checkout.read_file("src/checkout/total.ts") == "return price + tax;\n"
+
+
+def test_surgeon_still_refuses_a_diff_that_touches_a_spec_file(ctx_patch_touching_a_spec):
+    checkout = ctx_patch_touching_a_spec.checkout
+    out = Surgeon().run(ctx_patch_touching_a_spec)
+    assert out.data["pr_url"] == "" and out.outcome == "failed"
+    assert checkout.github.pull_requests == [], "a rejected diff must never reach pr.open at all"
+
+
+def test_surgeon_still_refuses_a_diff_that_deletes_a_spec_file(ctx_patch_deleting_a_spec):
+    checkout = ctx_patch_deleting_a_spec.checkout
+    out = Surgeon().run(ctx_patch_deleting_a_spec)
+    assert out.data["pr_url"] == "" and out.outcome == "failed"
+    assert checkout.github.pull_requests == [], "a rejected diff must never reach pr.open at all"
+
+
+def test_surgeon_never_pushes_to_the_default_branch(ctx_catalog_finding):
+    checkout = ctx_catalog_finding.checkout
+    Surgeon().run(ctx_catalog_finding)
+
+    pr = checkout.github.pull_requests[0]
+    assert pr["branch"] != "main" and pr["branch"].startswith("plumbline/")
+
+    # The real remote's own `main` ref is untouched -- still the one seed
+    # commit, never overwritten by the push this run made.
+    import subprocess
+    refs = subprocess.run(
+        ["git", "ls-remote", "--heads", str(checkout.path.parent / "origin.git")],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    main_lines = [l for l in refs.splitlines() if l.endswith("refs/heads/main")]
+    assert len(main_lines) == 1
+    branch_lines = [l for l in refs.splitlines() if pr["branch"] in l]
+    assert len(branch_lines) == 1, "the new branch must exist on the remote too"
+
+
+def test_a_gated_patch_leaves_a_real_pr_open_and_unmerged(ctx_payment_finding):
+    checkout = ctx_payment_finding.checkout
+    out = Surgeon().run(ctx_payment_finding)
+
+    assert out.outcome == "gated" and out.data["gated"] is True
+    assert out.data["pr_url"].startswith("https://")
+    assert len(checkout.github.pull_requests) == 1, "the PR was really opened, gate or not"
+    patch = ctx_payment_finding.repo.patch_for_finding("f_payment")
+    assert patch.gate_state == "awaiting_approval", "never auto-merged behind the gate"
+    assert patch.pr_url == out.data["pr_url"]
+
+
+def test_surgeon_does_not_run_when_there_is_no_checkout(ctx_no_checkout):
+    out = Surgeon().run(ctx_no_checkout)
+    assert out.outcome == "skipped"
+    assert out.data["pr_url"] == "" and out.data["gated"] is False
+    assert ctx_no_checkout.model.calls == [], "no repo connected means no drafting at all"
+    assert ctx_no_checkout.gateway._ledger.entries("ws1") == [], \
+        "no repo connected means no gateway call at all -- not even a blocked one"
+
+
+def test_a_token_never_appears_in_a_ledger_entry_or_step_detail(ctx_catalog_finding):
+    token = "ghs_averyRealisticFAKEInstallationToken1234567890"
+    ctx_catalog_finding.checkout.token = token
+
+    out = Surgeon().run(ctx_catalog_finding)
+
+    import json
+    ledger_json = json.dumps(ctx_catalog_finding.gateway._ledger.entries("ws1"))
+    assert token not in ledger_json
+    assert token not in out.summary
+    assert token not in out.detail
+    assert token not in json.dumps(out.data)

@@ -84,6 +84,25 @@ class Author:
     name = "author"
 
     def run(self, ctx) -> AgentResult:
+        # Tier 2 (2026-08-30): a real spec file needs somewhere real to
+        # live. `ctx.checkout is None` means this workspace has no
+        # connected GitHub repository -- a demo sandbox, or a real
+        # workspace that has not connected one yet -- and Author skips
+        # outright, with an explanatory step, rather than crash reaching
+        # for a checkout that was never built. See `job/checkout.py`'s
+        # own module docstring and the fleet-wide rule this shares with
+        # Healer/Surgeon: every agent either runs or explains why it did
+        # not.
+        if ctx.checkout is None:
+            return AgentResult(
+                summary="Author skipped -- no repository connected",
+                detail="This workspace has no connected GitHub repository, so there is "
+                       "nowhere to write a real spec file. Connect a repository "
+                       "(Settings > GitHub) to let Author write specs.",
+                outcome="skipped",
+                data={"specs": [], "written": 0},
+            )
+
         drafted_behaviours = {
             b.route: b.text
             for b in ctx.repo.behaviours_for_workspace(ctx.workspace_id)
@@ -141,6 +160,13 @@ class Author:
             for route_path, behaviour_text, content in authored:
                 path = _spec_path(route_path)
                 ctx.repo.put_spec(ctx.workspace_id, path, content)
+                # The real file, on the real checkout -- alongside (not
+                # instead of) the Firestore write above. Firestore stays
+                # the record the Behaviours screen and Surgeon's own
+                # `specs_for_workspace` read; the checkout is what lets a
+                # real `PlaywrightDriver` (`cwd=` pointed at it) actually
+                # execute this spec later in the same run.
+                ctx.checkout.write_file(path, content)
                 ctx.repo.put_behaviour(Behaviour(
                     id=f"bh_{uuid.uuid4().hex[:12]}", workspace_id=ctx.workspace_id,
                     text=behaviour_text or f"Cover {route_path}",

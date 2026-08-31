@@ -7,7 +7,7 @@ from agents.cartographer import Cartographer
 from agents.chaos import Chaos, _TOXIC_CORPUS
 from app.models import Run
 from gateway.gateway import GatewayError
-from tests.agent_fixtures import make_ctx
+from tests.agent_fixtures import make_checkout, make_ctx
 
 
 @pytest.fixture
@@ -109,10 +109,15 @@ def test_a_reflected_toxic_payload_is_still_caught_downstream_by_cartographer_an
     toxic payload and a model prompt, once it comes back out of the app."""
     injection_payload = next(p for p in _TOXIC_CORPUS if "ignore" in p.lower())
 
+    # Tier 2 (2026-08-30): Author now skips outright with no connected
+    # repo (`ctx.checkout is None`) -- see `agents/author.py`'s own
+    # guard -- so this test needs a real checkout attached for Author to
+    # reach its screening logic at all, the thing this test actually
+    # means to prove.
     ctx = make_ctx(pages={
         "/": {"links": ["/reflected"]},
         "/reflected": {"a11y": [{"ref": "e1", "role": "button", "name": injection_payload}]},
-    })
+    }, checkout=make_checkout())
     Cartographer().run(ctx)
 
     with pytest.raises(GatewayError):

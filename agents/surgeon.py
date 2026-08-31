@@ -126,7 +126,6 @@ Three gateway calls when a patch verifies, none of them looped:
 """
 
 import re
-import uuid
 
 from agents.base import AgentResult
 from app.models import Patch
@@ -193,6 +192,95 @@ def _new_paths(diff: str) -> list[str]:
     paths = {p for raw in _NEW_PATH.findall(diff) if (p := _clean_path(raw)) is not None}
     paths |= {p for raw in _RENAME_TO.findall(diff) if (p := _clean_path(raw)) is not None}
     return sorted(paths)
+
+
+def _diff_sections(diff: str) -> dict[str, str]:
+    """`new_path -> everything between that file's own '+++ b/<path>' header
+    and the next '--- a/' header (or the end of the diff)` -- Tier 2's own
+    addition, used only AFTER a diff has cleared `_blast_radius_violation`,
+    to find which part of the diff belongs to which file when realising it
+    onto the checkout (see `_change_groups`/`_apply_diff_to_checkout`
+    below). A deletion (post path `None`, via `_clean_path`) is never a
+    key here -- there is nothing to apply for a path this diff removes,
+    and the guard above has already refused any diff that removes a
+    spec; a non-spec deletion is simply not realised onto disk (Surgeon
+    proposes source FIXES, never file removals, per its own prompt)."""
+    sections: dict[str, str] = {}
+    current: str | None = None
+    body: list[str] = []
+    for line in diff.splitlines(keepends=True):
+        if line.startswith("--- "):
+            if current is not None:
+                sections[current] = "".join(body)
+            current, body = None, []
+            continue
+        if line.startswith("+++ "):
+            current = _clean_path(line[4:].strip())
+            continue
+        if current is not None:
+            body.append(line)
+    if current is not None:
+        sections[current] = "".join(body)
+    return sections
+
+
+def _change_groups(section_body: str) -> list[tuple[str, str]]:
+    """`[(old_text, new_text), ...]` -- every contiguous run of removed
+    ('-') lines paired with the contiguous run of added ('+') lines that
+    immediately follows it, read off one file's own diff section.
+    Deliberately ignores hunk range headers ('@@ ... @@') and their own
+    (often, in this fleet's own model-drafted diffs, imprecise) line
+    counts entirely -- `_apply_diff_to_checkout` below matches by
+    CONTENT, not by position, which is what makes it robust to a diff
+    whose header counts do not exactly match its body (this module's own
+    prompt, `_prompt` below, asks a model for a diff; nothing about a
+    model's output is guaranteed to satisfy `git apply`'s own stricter
+    bookkeeping). This is deliberately not a general patch engine: it is
+    exactly as much structure as Surgeon's own prompt ever asks a model
+    to produce -- one minimal replacement per fix."""
+    groups: list[tuple[str, str]] = []
+    removed: list[str] = []
+    added: list[str] = []
+
+    def flush():
+        if removed or added:
+            groups.append(("".join(removed), "".join(added)))
+        removed.clear()
+        added.clear()
+
+    for line in section_body.splitlines(keepends=True):
+        if line.startswith("@@"):
+            flush()
+        elif line.startswith("-") and not line.startswith("---"):
+            removed.append(line[1:])
+        elif line.startswith("+") and not line.startswith("+++"):
+            added.append(line[1:])
+        else:
+            flush()
+    flush()
+    return groups
+
+
+def _apply_diff_to_checkout(checkout, diff: str, paths: list[str]) -> None:
+    """Realises `diff` onto `checkout`'s real files, for exactly the
+    `paths` a caller has already resolved as this diff's post-image
+    (`_new_paths`) -- content-matched, not position-matched (see
+    `_change_groups`), so a diff whose hunk header counts are slightly
+    off from its own body (a real risk with model-drafted output) still
+    applies cleanly rather than being rejected the way a strict `git
+    apply` would refuse it."""
+    sections = _diff_sections(diff)
+    for path in paths:
+        try:
+            content = checkout.read_file(path)
+        except FileNotFoundError:
+            content = ""
+        for old_text, new_text in _change_groups(sections.get(path, "")):
+            if old_text and old_text in content:
+                content = content.replace(old_text, new_text, 1)
+            elif not old_text:
+                content += new_text
+        checkout.write_file(path, content)
 
 
 def _blast_radius_violation(all_paths: set[str], known_specs: set[str]) -> str | None:
@@ -266,6 +354,26 @@ class Surgeon:
     def run(self, ctx) -> AgentResult:
         empty_data = {"diff": "", "files": [], "verified": False, "pr_url": "", "gated": False}
 
+        # Tier 2 (2026-08-30): a real patch needs somewhere real to
+        # commit and a real client to open a pull request through. See
+        # `agents/author.py`/`agents/healer.py`'s identical guards and
+        # `job/checkout.py`'s own module docstring -- same fleet-wide
+        # rule: no connected repo means Surgeon skips outright, with an
+        # explanatory step, rather than crash reaching for a checkout
+        # that was never built. Demo sandboxes take this path every
+        # time, by construction (`job/worker.py`'s `_checkout_factory`
+        # never builds one for `is_demo`) -- "a demo run stays
+        # simulated" is this task's own non-negotiable.
+        if ctx.checkout is None:
+            return AgentResult(
+                summary="Surgeon skipped -- no repository connected",
+                detail="This workspace has no connected GitHub repository, so there is "
+                       "nowhere to commit a fix or open a pull request. Connect a "
+                       "repository (Settings > GitHub) to let Surgeon act on triaged findings.",
+                outcome="skipped",
+                data=empty_data,
+            )
+
         findings = [f for f in ctx.repo.findings_for_workspace(ctx.workspace_id) if f.status == "triaged"]
         if not findings:
             return AgentResult(summary="No findings ready for a patch", outcome="ok", data=empty_data)
@@ -327,7 +435,34 @@ class Surgeon:
         target = ", ".join(files)
 
         def open_pr():
-            url = f"https://github.com/example/repo/pull/{uuid.uuid4().hex[:8]}"
+            # Tier 2: a real branch, a real commit, a real push, then a
+            # real pull request via `app/github.py`'s own client -- the
+            # fabricated `f"https://github.com/example/repo/pull/{uuid4()...}"`
+            # this replaced never touched a checkout at all. `branch()`
+            # NEVER names `ctx.checkout.default_branch` -- a fresh,
+            # per-finding branch name is the one thing standing between
+            # this call and a push straight to `main` (see the module
+            # docstring's "never contents: write on the default branch").
+            branch_name = f"plumbline/patch-{finding.id}"
+            ctx.checkout.branch(branch_name)
+            _apply_diff_to_checkout(ctx.checkout, diff, files)
+            ctx.checkout.commit_all(f"plumbline: {finding.title}"[:72])
+            ctx.checkout.push()
+
+            changes = {}
+            for path in files:
+                try:
+                    changes[path] = ctx.checkout.read_file(path)
+                except FileNotFoundError:
+                    continue
+
+            url = ctx.checkout.github.open_pull_request(
+                ctx.checkout.repo_full_name, branch_name,
+                title=f"plumbline: {finding.title}"[:120],
+                body=f"Automated fix for finding `{finding.id}`.\n\n"
+                     f"{finding.title}\n\nRoute: {finding.route or '(unresolved)'}",
+                changes=changes, default_branch=ctx.checkout.default_branch,
+            )
             patch = ctx.repo.patch_for_finding(finding.id)
             ctx.repo.put_patch(type(patch)(**{**patch.__dict__, "pr_url": url}))
             return url

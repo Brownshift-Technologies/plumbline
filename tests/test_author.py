@@ -5,13 +5,14 @@ import pytest
 from agents.author import Author
 from app.models import Behaviour, Route, Workspace
 from gateway.gateway import GatewayError
-from tests.agent_fixtures import make_ctx
+from tests.agent_fixtures import make_checkout, make_ctx
 
 _GOOD = "test('checkout works', async ({ page }) => { await page.goto('/checkout'); });"
+_UNSET = object()  # distinguishes "no checkout= passed" from an explicit checkout=None
 
 
-def _ctx_with_routes(routes, **kwargs):
-    ctx = make_ctx(**kwargs)
+def _ctx_with_routes(routes, checkout=_UNSET, **kwargs):
+    ctx = make_ctx(checkout=make_checkout() if checkout is _UNSET else checkout, **kwargs)
     for route in routes:
         ctx.repo.put_route(route)
     return ctx
@@ -170,3 +171,30 @@ def test_it_refuses_to_author_when_a_page_elements_own_accessible_name_is_an_inj
     with pytest.raises(GatewayError):
         Author().run(ctx)
     assert ctx.model.calls == [], "the poisoned element text must never reach the model"
+
+
+# --- Tier 2 (2026-08-30): writing into a real checkout --------------------
+
+
+def test_author_writes_a_real_spec_file_into_the_checkout():
+    checkout = make_checkout()
+    ctx = _ctx_with_routes(
+        [Route(id="r1", workspace_id="ws1", path="/checkout", coverage_pct=0)],
+        checkout=checkout, model_responses=[_spec("/checkout")],
+    )
+    out = Author().run(ctx)
+    path = out.data["specs"][0]
+    assert checkout.read_file(path) == _spec("/checkout")
+
+
+def test_author_does_not_run_when_there_is_no_checkout():
+    ctx = _ctx_with_routes(
+        [Route(id="r1", workspace_id="ws1", path="/checkout", coverage_pct=0)],
+        checkout=None, model_responses=[_spec("/checkout")],
+    )
+    out = Author().run(ctx)
+    assert out.outcome == "skipped"
+    assert out.data["written"] == 0
+    assert ctx.model.calls == [], "no repo connected means no drafting at all"
+    assert ctx.repo.behaviours_for_workspace("ws1") == []
+    assert "no connected" in out.detail.lower() or "no repository" in out.detail.lower()
