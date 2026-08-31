@@ -37,6 +37,7 @@ from app.billing_routes import router as billing_router
 from app.docs import register_docs
 from app.finding_routes import router as finding_router
 from app.ledger_routes import router as ledger_router
+from app.mcp_server import router as mcp_router
 from app.models import User, Workspace
 from app.oauth_routes import router as oauth_router
 from app.providers import GitHubProvider, GoogleProvider, OktaProvider
@@ -281,6 +282,7 @@ def build_app(config: PlumblineConfig | None = None, repo: Repo | None = None) -
     app.include_router(api_keys_router)
     app.include_router(webhooks_router)
     app.include_router(public_router)
+    app.include_router(mcp_router)
     register_docs(app)
 
     @app.get("/_health")
