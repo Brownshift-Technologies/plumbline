@@ -91,6 +91,21 @@ class Workspace:
     # flag is only ever consulted once, at the very top of `execute()`,
     # before any agent has run.
     fleet_paused: bool = False
+    # Task 14d: the public API's per-key token-bucket ceiling, in requests
+    # per minute -- shared by every `pk_live_` key this workspace has
+    # issued (rate limiting is per KEY, not per workspace-wide total; see
+    # `app/api_keys.py`). Living on `Workspace` rather than a hardcoded
+    # constant is the whole point of "on the workspace's plan so it can be
+    # raised without a deploy" (the brief's own words): a support engineer
+    # raises a customer's ceiling with a `repo.put_workspace` write, not a
+    # code change and a redeploy. 60/minute is `_PLAN_CATALOGUE`'s
+    # (app/billing_routes.py) own "team" plan's implicit default -- there is
+    # no per-plan table for this yet, deliberately: unlike seats/run_limit,
+    # which every plan tier already prices distinctly, nothing in this task
+    # ties API rate ceilings to a plan name, so a single workspace-level
+    # default that any workspace can be individually raised past is the
+    # honest shape for what actually exists today.
+    api_rate_limit_per_minute: int = 60
 
 
 @dataclass(frozen=True)
@@ -124,6 +139,73 @@ class PasswordReset:
     user_id: str
     expires_at: float
     used: bool = False
+    created_at: float = field(default_factory=time.time)
+
+
+@dataclass(frozen=True)
+class ApiKey:
+    """A `pk_live_` public-API credential (Task 14d). Never carries the raw
+    key -- only `key_hash` (SHA-256 hex of the raw value), exactly like
+    `PasswordReset.id` above: a leaked `api_keys` collection must not hand
+    an attacker a working key for anything. `id` is a separate, unrelated
+    random id (not derived from the key at all), used for `GET`/`DELETE
+    /api/keys/{id}` -- a customer managing their own keys never needs, and
+    is never shown, anything the raw key or its hash would leak.
+
+    `role` mirrors `Membership.role` (`Role`, `app/models.py`'s own type):
+    a key's role is fixed at creation, and everywhere a key is used
+    (`app/api_keys.py`'s `require_api_role`, the MCP server's per-key tool
+    filtering in Task 14e) checks THIS field, never anything wider. A key
+    can never exceed the role it was issued with because nothing here
+    reads any role but this one.
+
+    `expires_at=None` means no expiry; `revoked_at` is set (not deleted --
+    Firestore has no delete, see `core/store.py`'s own module docstring)
+    the moment `DELETE /api/keys/{id}` runs, and is checked on every
+    authentication alongside expiry so a revoked key "stops working
+    immediately" rather than merely being hidden from `GET /api/keys`.
+    """
+
+    id: str
+    workspace_id: str
+    name: str
+    role: Role
+    key_hash: str
+    prefix: str
+    created_by: str
+    created_at: float = field(default_factory=time.time)
+    expires_at: float | None = None
+    revoked_at: float | None = None
+
+
+@dataclass(frozen=True)
+class Webhook:
+    """An outbound delivery target for `run.finished`/`finding.created`/
+    `patch.ready`/`patch.approved` (Task 14d). `secret` signs every
+    delivery's body as an HMAC (`app/webhooks.py`'s `sign_payload`) so a
+    receiver can verify a POST actually came from Plumbline -- generated
+    once at creation, alongside the key, and never re-shown either (same
+    "shown once" discipline as `ApiKey`, though here the receiver is
+    expected to have copied it down at setup time rather than this being
+    a security-critical secret at the same tier as an API key: it signs
+    outbound calls WE make, it does not authenticate inbound ones).
+
+    `status`/`failure_count` are what "an endpoint is failing" means
+    concretely -- `app/webhooks.py`'s delivery loop increments
+    `failure_count` on each failed attempt and flips `status` to
+    `"failing"` once the retry budget (five attempts) is exhausted, so the
+    UI has a real field to render rather than inferring health from ledger
+    entries.
+    """
+
+    id: str
+    workspace_id: str
+    url: str
+    secret: str
+    events: tuple[str, ...] = ()
+    status: str = "active"
+    failure_count: int = 0
+    created_by: str = ""
     created_at: float = field(default_factory=time.time)
 
 

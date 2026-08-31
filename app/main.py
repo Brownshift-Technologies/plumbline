@@ -30,19 +30,24 @@ from fastapi import FastAPI
 
 from app.account_routes import router as account_router
 from app.agent_routes import router as agent_router
+from app.api_keys import router as api_keys_router
 from app.auth_routes import router as auth_router
 from app.behaviour_routes import router as behaviour_router
 from app.billing_routes import router as billing_router
+from app.docs import register_docs
 from app.finding_routes import router as finding_router
 from app.ledger_routes import router as ledger_router
 from app.models import User, Workspace
 from app.oauth_routes import router as oauth_router
 from app.providers import GitHubProvider, GoogleProvider, OktaProvider
+from app.public_routes import router as public_router
 from app.repo import Repo
 from app.run_routes import router as run_router
 from app.sessions import SessionService
 from app.surface_routes import router as surface_router
 from app.settings import PlumblineConfig, load_settings
+from app.webhooks import dispatch_run_finished
+from app.webhooks import router as webhooks_router
 from core.events import enqueue_job
 from core.telemetry import log_event
 from core.web import create_app
@@ -79,22 +84,40 @@ _INSECURE_DEV_OAUTH_SECRET = "plumbline-dev-oauth-secret-DO-NOT-USE-IN-PRODUCTIO
 _OAUTH_SECRET_OPTIONAL_ENVS = frozenset({"test", "dev"})
 
 
-def _on_event(payload: dict) -> None:
-    """Pub/Sub handler for Plumbline's own topics.
+def _on_event_factory(repo: Repo, ledger: Ledger):
+    """Build `build_app`'s `_on_event` Pub/Sub handler, closed over the SAME
+    `repo`/`ledger` this app's routes use -- a factory (the same pattern
+    `_seed_demo_if_missing_factory` below already uses) rather than a
+    bare module-level function, because `core.web.create_app(_on_event,
+    ...)` is called before `app.state.repo`/`app.state.ledger` exist (see
+    `build_app`), so this closure is what lets the handler reach them at
+    all without a second, divergent `Repo`/`Ledger` pair.
 
-    No Plumbline code publishes to this service's subscription yet --
-    Task 14a+ wires `run.requested`/`run.step`/`run.finished` through
-    `core.events.enqueue_job` and the agent fleet that consumes them.
-    Until that lands, this is deliberately a no-op beyond a log line: it
-    makes a message's arrival visible in Cloud Logging instead of it
-    disappearing silently, without inventing handling for events nothing
-    publishes yet. `core.web.create_app`'s `/events` endpoint acks 204
-    regardless of what this function does or raises (see that module's
-    docstring for why), so there is no correctness reason to do more here
-    before there is something real to do.
+    `core.events.publish_event` embeds the event name as payload["type"]
+    (see that function's own docstring: `{"type": event_type, **payload}`)
+    -- `job/worker.py` is this codebase's only publisher today, firing
+    `"run.finished"` in both the success and failure path with `run_id`/
+    `workspace_id`/`state`. Task 14d's webhook mechanism
+    (`app/webhooks.py`) hooks in exactly here: a `run.finished` push is
+    the one webhook event this codebase has a real trigger for end to end
+    (see `app/webhooks.py`'s own module docstring for why
+    `finding.created`/`patch.ready`/`patch.approved` do not, yet).
+    `core.web.create_app`'s `/events` endpoint acks 204 regardless of what
+    this handler does or raises, so a malformed or unrecognised payload
+    is simply logged and ignored, never a reason to fail the ack.
     """
-    keys = sorted(payload.keys()) if isinstance(payload, dict) else None
-    log_event("event.plumbline_received", severity="INFO", keys=keys)
+
+    def _on_event(payload: dict) -> None:
+        keys = sorted(payload.keys()) if isinstance(payload, dict) else None
+        log_event("event.plumbline_received", severity="INFO", keys=keys)
+        if not isinstance(payload, dict) or payload.get("type") != "run.finished":
+            return
+        workspace_id = payload.get("workspace_id")
+        if not workspace_id:
+            return
+        dispatch_run_finished(repo, ledger, workspace_id, payload)
+
+    return _on_event
 
 
 def _bootstrap_workspace(user: User) -> Workspace:
@@ -212,13 +235,18 @@ def build_app(config: PlumblineConfig | None = None, repo: Repo | None = None) -
         )
 
     rp = repo or Repo(cfg)
+    # Built before `create_app` (below), not after -- `_on_event_factory`
+    # needs a real `Ledger` to dispatch webhooks with, and `create_app`
+    # is what wires `_on_event` in as the `/events` handler. Reused as-is
+    # on `app.state.ledger` just below, rather than constructed twice.
+    ledger = Ledger(rp)
 
-    app = create_app(_on_event, "plumbline-api")
+    app = create_app(_on_event_factory(rp, ledger), "plumbline-api")
 
     app.state.config = cfg
     app.state.repo = rp
     app.state.sessions = SessionService(rp, cfg)
-    app.state.ledger = Ledger(rp)
+    app.state.ledger = ledger
     app.state.gateway = Gateway(rp, app.state.ledger)
     app.state.bootstrap_workspace = _bootstrap_workspace
     app.state.seed_demo_if_missing = _seed_demo_if_missing_factory(cfg, rp)
@@ -250,6 +278,10 @@ def build_app(config: PlumblineConfig | None = None, repo: Repo | None = None) -
     app.include_router(agent_router)
     app.include_router(ledger_router)
     app.include_router(billing_router)
+    app.include_router(api_keys_router)
+    app.include_router(webhooks_router)
+    app.include_router(public_router)
+    register_docs(app)
 
     @app.get("/_health")
     def _health():
