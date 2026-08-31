@@ -40,6 +40,7 @@ from app.github import GitHubApp
 from app.github_routes import router as github_router
 from app.ledger_routes import router as ledger_router
 from app.mcp_server import router as mcp_router
+from app.member_routes import router as member_router
 from app.models import User, Workspace
 from app.oauth_routes import router as oauth_router
 from app.providers import GitHubProvider, GoogleProvider, OktaProvider
@@ -292,6 +293,7 @@ def build_app(config: PlumblineConfig | None = None, repo: Repo | None = None) -
     app.include_router(surface_router)
     app.include_router(behaviour_router)
     app.include_router(agent_router)
+    app.include_router(member_router)
     app.include_router(ledger_router)
     app.include_router(billing_router)
     app.include_router(api_keys_router)
