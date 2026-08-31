@@ -5,7 +5,12 @@ import { defineConfig, devices } from "@playwright/test";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
 const PORT = Number(process.env.PLUMBLINE_E2E_PORT ?? 8130);
-const BASE_URL = `http://127.0.0.1:${PORT}`;
+// PLUMBLINE_E2E_BASE_URL points the suite at an already-running app --
+// the deployed Cloud Run service, say -- instead of the local fixture
+// server. The local server seeds deterministic fixtures the specs rely on,
+// so this is for auditing a real deployment, not for the normal run.
+const REMOTE = process.env.PLUMBLINE_E2E_BASE_URL;
+const BASE_URL = REMOTE ?? `http://127.0.0.1:${PORT}`;
 
 /**
  * Drives the BUILT dashboard (`web/dist`, `npm run build`) against a real,
@@ -56,7 +61,7 @@ export default defineConfig({
     },
   ],
 
-  webServer: {
+  ...(REMOTE ? {} : { webServer: {
     command: `uv run python3 web/e2e/server.py --port ${PORT}`,
     cwd: REPO_ROOT,
     url: `${BASE_URL}/_health`,
@@ -67,5 +72,5 @@ export default defineConfig({
     },
     stdout: "pipe",
     stderr: "pipe",
-  },
+  } }),
 });

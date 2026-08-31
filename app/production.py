@@ -64,16 +64,36 @@ DIST_DIR = REPO_ROOT / "web" / "dist"
 
 app = build_app()
 
+# Vite fingerprints every file under /assets (index-<hash>.js), so an
+# asset URL's content can never change -- cache it for a year. index.html
+# is the opposite: it is the ONLY file that names the current hashes, so a
+# browser holding a stale copy keeps loading a superseded bundle and keeps
+# hitting bugs that were fixed and deployed hours ago. It was served with
+# no Cache-Control, no ETag and no Last-Modified at all, which lets a
+# browser apply heuristic freshness and cache it for as long as it likes.
+_IMMUTABLE = "public, max-age=31536000, immutable"
+_NEVER = "no-store, no-cache, must-revalidate"
+
+
+class _ImmutableAssets(StaticFiles):
+    """StaticFiles that marks fingerprinted assets immutable."""
+
+    def file_response(self, *args, **kwargs):  # type: ignore[override]
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = _IMMUTABLE
+        return response
+
+
 if (DIST_DIR / "index.html").exists():
-    app.mount("/assets", StaticFiles(directory=str(DIST_DIR / "assets")), name="assets")
+    app.mount("/assets", _ImmutableAssets(directory=str(DIST_DIR / "assets")), name="assets")
 
     @app.get("/favicon.svg")
     def _favicon():
-        return FileResponse(str(DIST_DIR / "favicon.svg"))
+        return FileResponse(str(DIST_DIR / "favicon.svg"), headers={"Cache-Control": _IMMUTABLE})
 
     @app.get("/icons.svg")
     def _icons():
-        return FileResponse(str(DIST_DIR / "icons.svg"))
+        return FileResponse(str(DIST_DIR / "icons.svg"), headers={"Cache-Control": _IMMUTABLE})
 
     _index_path = DIST_DIR / "index.html"
 
@@ -85,4 +105,9 @@ if (DIST_DIR / "index.html").exists():
         # resolves a request against routes in the order they were
         # registered. Same ordering guarantee `web/e2e/server.py`'s own
         # identical fallback documents and relies on.
-        return FileResponse(str(_index_path))
+        #
+        # `no-store` because this file names the current asset hashes. Serve
+        # it stale and the browser fetches a superseded bundle -- the user
+        # keeps hitting a bug that was fixed and redeployed, and no amount
+        # of redeploying reaches them until they hard-refresh.
+        return FileResponse(str(_index_path), headers={"Cache-Control": _NEVER})
