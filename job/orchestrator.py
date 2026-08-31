@@ -17,19 +17,32 @@ about Cartographer, Author, Healer, Chaos, Runner, Triager, and Surgeon.
 Those seven keep the exact relative order the brief specifies. The four
 newer agents are placed here, deliberately, as follows:
 
-- **Sentinel runs before Cartographer -- but only when the workspace has
-  an open incident.** A production incident should shape what gets mapped
-  and tested, not arrive after the crawl has already decided what "the
-  site" looks like. Unlike every other agent in this sequence, Sentinel is
-  the one this module skips SILENTLY (no `Step` at all) when its
-  precondition (an open `Incident`) does not hold -- "no incidents right
-  now" is the overwhelmingly common state of the world for most runs, the
-  same routine-and-unremarkable case Triager/Surgeon are skipped for below
-  when Runner found nothing to triage. `Sentinel.run()` itself already
-  handles "no incidents" gracefully (returns an `ok` `AgentResult` doing
-  nothing) -- this module's own precondition check exists purely so that a
-  clean run's step count does not carry a permanent, always-present
-  "nothing happened" row for an agent that had no reason to run at all.
+- **Sentinel runs first, before Cartographer, unconditionally, every
+  run.** A production incident should shape what gets mapped and tested,
+  not arrive after the crawl has already decided what "the site" looks
+  like. Fix round 1 reversed this module's own original design here: an
+  earlier version gated Sentinel on an `_has_open_incidents` precondition
+  check and skipped it SILENTLY (no `Step` at all) when no `Incident` was
+  open, reasoning that "no incidents today" is the routine, unremarkable
+  case -- the same category as Triager/Surgeon being skipped below when
+  Runner found nothing to triage. That reasoning does not survive contact
+  with debuggability: unlike Runner-found-nothing (which WRITES a real
+  step with an explanatory detail before anything downstream goes quiet),
+  a bug in `_has_open_incidents` itself -- a wrong status string, a wrong
+  `workspace_id`, a query fault -- is indistinguishable from a genuine
+  "no incidents" state; both produce zero rows and zero steps, and a
+  customer asking "why didn't my incident produce a behaviour?" has
+  nothing in the run's own record to tell the two apart. Sentinel's own
+  `run()` already returns a cheap, honest "No open incidents" `AgentResult`
+  (one `telemetry.read` gateway call, no model call) when there is nothing
+  to do -- there was never a real need to suppress that step at all.
+  The general principle this reversal established for the whole fleet:
+  **every agent either runs or explains why it did not** -- Oracle's
+  explicit `outcome="skipped"` step (below) is the one place true
+  silence is still earned, because Oracle's precondition (does the
+  workspace have two environments configured) is read directly off
+  `Workspace.environments`, not derived from a query that could itself be
+  wrong the same way `_has_open_incidents` was.
 - **Auditor runs immediately after Cartographer.** Its whole SCOPES-level
   job (`browser.read`, `graph.read`) is auditing the routes Cartographer
   just mapped; running it any later would mean running it against a graph
@@ -288,8 +301,17 @@ class Orchestrator:
     # -- the sequence itself --------------------------------------------
 
     def _execute_sequence(self, ctx: AgentContext, run: Run) -> None:
-        if self._has_open_incidents(ctx):
-            self._step(Sentinel(), ctx, run)
+        # Fix round 1: Sentinel now runs unconditionally, every time --
+        # see the module docstring's own updated note. It used to be
+        # gated on `_has_open_incidents`, silently absent otherwise; that
+        # made a genuine bug in the precondition check (a wrong status
+        # string, a wrong workspace_id, a query fault) indistinguishable
+        # from the ordinary "no incidents today" case -- both produce zero
+        # rows and zero steps. `Sentinel.run()` already returns a cheap,
+        # honest "No open incidents" AgentResult when there is nothing to
+        # do (see agents/sentinel.py), so there was never a real need to
+        # suppress its step at all.
+        self._step(Sentinel(), ctx, run)
 
         cartographer_result = self._step(Cartographer(), ctx, run)
         if cartographer_result is not None and not cartographer_result.data.get("routes"):
@@ -338,9 +360,6 @@ class Orchestrator:
         ctx.browsers[baseline_env] = self._browser_factory(baseline_env)
         ctx.browsers[candidate_env] = self._browser_factory(candidate_env)
         self._step(Oracle(baseline_env=baseline_env, candidate_env=candidate_env), ctx, run)
-
-    def _has_open_incidents(self, ctx: AgentContext) -> bool:
-        return any(i.status == "open" for i in self._repo.incidents_for_workspace(ctx.workspace_id))
 
     # -- per-agent execution, Step-writing, and outcome classification --
 

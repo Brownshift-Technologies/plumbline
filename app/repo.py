@@ -203,6 +203,26 @@ class Repo:
         workspace no longer exists (deleted between the run being enqueued
         and a worker picking it up -- `job/orchestrator.py` is the caller
         that decides what a run with no workspace left to bill becomes).
+
+        Fix round 1: also re-stamps `started_at` to the moment OF THIS
+        CLAIM, not the moment the `Run` document was first constructed.
+        `Run.started_at` defaults via `field(default_factory=time.time)` at
+        OBJECT CONSTRUCTION -- for a real run, that is when `POST /api/runs`
+        builds and enqueues it, not when a worker actually picks it up and
+        starts executing agents. Before this fix, `job/orchestrator.py`'s
+        `_finish` computed `duration_ms` from that original, pre-claim
+        timestamp, so a run that sat queued for any real stretch (Cloud Run
+        Job cold start, a busy queue) recorded queue-wait time as part of
+        its own execution duration. That is exactly the number
+        `agents/chaos.py`'s observed-p99 branch reads back later to derive
+        injected fault latency from -- a wrong `duration_ms` here does not
+        stay a cosmetic reporting bug, it silently corrupts a LATER run's
+        fault-injection parameters. Restamping here, inside the same
+        transaction that flips `state` to `"running"`, is what makes
+        "queued" and "running" share one honest boundary: `_finish` (Task
+        13) already re-reads the row it is finishing rather than trusting a
+        possibly-stale in-memory copy, so it picks up this new value for
+        free with no change needed on that side.
         """
         from google.cloud import firestore
 
@@ -226,6 +246,7 @@ class Repo:
             transaction.set(workspace_ref, workspace_data)
 
             run_data["state"] = "running"
+            run_data["started_at"] = time.time()
             transaction.set(run_ref, run_data)
             return Run(**run_data)
 

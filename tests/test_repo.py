@@ -269,6 +269,28 @@ def test_claim_run_transitions_to_running_and_bills_the_workspace_once():
     assert r.workspace("ws1").runs_used == 1
 
 
+def test_claim_run_stamps_started_at_when_it_takes_the_run():
+    # Fix round 1: Run.started_at defaults at OBJECT CONSTRUCTION -- when a
+    # run is created/enqueued -- not when a worker actually claims and
+    # starts executing it. claim_run must overwrite it with the moment OF
+    # THE CLAIM, or job/orchestrator.py's own duration calculation ends up
+    # including however long the run sat queued (see
+    # tests/test_orchestrator.py's test_duration_excludes_time_spent_queued
+    # for the end-to-end consequence).
+    r = _repo()
+    r.put_workspace(Workspace(id="ws1", name="Acme", repo="acme/site"))
+    an_hour_ago = 1000.0
+    r.put_run(Run(id="run1", workspace_id="ws1", number=1, trigger="manual", started_at=an_hour_ago))
+
+    claimed = r.claim_run("run1")
+
+    assert claimed.started_at != an_hour_ago
+    assert claimed.started_at > an_hour_ago
+    # Persisted, not just returned -- a later plain read sees the same
+    # restamped value, not the original one.
+    assert r.run("run1").started_at == claimed.started_at
+
+
 def test_claim_run_refuses_a_run_that_is_not_queued():
     r = _repo()
     r.put_workspace(Workspace(id="ws1", name="Acme", repo="acme/site"))

@@ -5,10 +5,16 @@ only ever sequenced Cartographer, Author, Healer, Chaos, Runner, Triager,
 and Surgeon, and its own literal example tests assert on exactly that
 seven-agent list. `job/orchestrator.py`'s module docstring lays out where
 the four newer agents now sit and why; the tests below assert on THAT
-eleven-agent sequence (nine real steps plus Oracle's own explicit skip
-step, in the base fixture -- Sentinel is silently absent when no incident
-is open, matching its own precondition) rather than the brief's original,
-now-stale seven-item list.
+eleven-agent sequence (ten real steps plus Oracle's own explicit skip
+step, in the base fixture) rather than the brief's original, now-stale
+seven-item list.
+
+Fix round 1 removed Sentinel's own precondition gate (it used to run only
+when the workspace had an open `Incident`, silently absent otherwise --
+see `job/orchestrator.py`'s module docstring for why that was reversed:
+"no incidents" and "the precondition check itself is broken" produced an
+identical, silent zero-step result). Sentinel now runs first, every time,
+unconditionally -- the tests below reflect that.
 
 Two testing strategies live side by side here, deliberately:
 
@@ -29,6 +35,8 @@ Two testing strategies live side by side here, deliberately:
   has to be reverse-engineered into a script of FakeModel/FakeBrowser
   responses just to reach one orchestrator-level edge case.
 """
+
+import time
 
 import pytest
 
@@ -95,6 +103,15 @@ def _bare_orch(repo, *, pages=None, spec_results=None, model_responses=()):
         model_factory=lambda: FakeModel(list(model_responses)),
         browser_factory=lambda env=None: FakeBrowser(pages or {}, spec_results or {}),
     )
+
+
+def orch_first_step_for_a_fresh_run(repo, run_id):
+    """Execute `run_id` against a 404'd single page (so Cartographer halts
+    the run right after Sentinel, keeping this cheap and deterministic) and
+    return the first `Step` written -- always Sentinel's."""
+    orch = _bare_orch(repo, pages={"/": {"error": "404"}})
+    orch.execute(run_id)
+    return orch._repo.steps_for_run(run_id)[0]
 
 
 def _stub_sequence(orch, agents):
@@ -166,8 +183,8 @@ def test_it_runs_the_fleet_in_order(orch, run):
     orch.execute(run.id)
     agents = [s.agent for s in orch._repo.steps_for_run(run.id)]
     assert agents == [
-        "cartographer", "auditor", "oracle", "author", "healer", "chaos",
-        "runner", "triager", "surgeon", "economist",
+        "sentinel", "cartographer", "auditor", "oracle", "author", "healer",
+        "chaos", "runner", "triager", "surgeon", "economist",
     ]
 
 
@@ -197,27 +214,75 @@ def test_every_step_is_written_as_it_happens_not_at_the_end(orch, run):
     orch._on_step = on_step
     orch.execute(run.id)
     assert seen_counts == list(range(1, len(seen_counts) + 1))
-    assert len(seen_counts) == 10
+    assert len(seen_counts) == 11
 
 
 def test_chaos_can_see_this_workspaces_own_history_because_the_orchestrator_calls_put_run(repo):
     # Ruling 1: the orchestrator itself is what makes Chaos's observed-p99
-    # branch reachable in production at all. Seed one PRIOR finished run
-    # with a real duration for ws1, then prove a SECOND run's Chaos step
-    # reads it (rather than silently falling back to the documented
-    # default every time, which is what happens with no put_run caller at
-    # all -- see agents/chaos.py's own module docstring).
+    # branch reachable in production at all. Fix round 1: the prior run is
+    # taken through the REAL create -> claim -> execute -> finish path
+    # (an earlier version of this test hardcoded duration_ms=5000 directly
+    # onto a seeded Run, which meant the create-to-claim gap this same fix
+    # round closed in Repo.claim_run -- see test_duration_excludes_time_
+    # spent_queued -- was never actually exercised by this test at all).
+    # A second run's Chaos step is then proven to read back whatever REAL
+    # number that produced, not a canned one.
     repo.put_workspace(Workspace(id="ws1", name="Acme", repo="acme/site"))
-    repo.put_run(Run(id="r0", workspace_id="ws1", number=1, trigger="manual",
-                      state="finished", duration_ms=5000))
+    prior = Run(id="r0", workspace_id="ws1", number=1, trigger="manual")
+    repo.put_run(prior)
+    orch0 = _bare_orch(repo, pages={"/": {"error": "404"}})  # empty app -> fast, deterministic finish
+    orch0.execute(prior.id)
+    prior_duration = orch0._repo.run(prior.id).duration_ms
+    assert prior_duration >= 0  # whatever it genuinely took, not a canned value
+
     run = Run(id="r1", workspace_id="ws1", number=2, trigger="manual")
     repo.put_run(run)
-
     orch = _bare_orch(repo, pages={"/": {"links": []}}, model_responses=[_VALID_SPEC])
     orch.execute(run.id)
     chaos_step = next(s for s in orch._repo.steps_for_run(run.id) if s.agent == "chaos")
-    assert "observed p99" in chaos_step.detail
-    assert "5000" in chaos_step.detail
+    if prior_duration > 0:
+        assert "observed p99" in chaos_step.detail
+        assert str(prior_duration) in chaos_step.detail
+    else:
+        # A genuinely instantaneous prior run (duration rounded to 0ms) is
+        # itself excluded from p99 history by agents/chaos.py's own
+        # `_observed_p99_ms` (`duration_ms > 0`) -- Chaos correctly falls
+        # back to its documented default rather than reading a fake zero.
+        assert "no observed p99 yet" in chaos_step.detail
+
+
+def test_duration_excludes_time_spent_queued(repo):
+    # The exact bug this fix round closes: Run.started_at defaults at
+    # OBJECT CONSTRUCTION (field(default_factory=time.time)) -- when a run
+    # is created/enqueued, not when a worker actually claims and starts
+    # executing it. Before Repo.claim_run restamped started_at, _finish
+    # computed duration_ms from that original, pre-claim timestamp, so a
+    # run that sat queued recorded queue-wait time as part of its own
+    # execution duration -- and Chaos would read that inflated number back
+    # as a workspace's "observed p99".
+    #
+    # Simulated with an explicit `started_at` an hour in the past, not a
+    # monkeypatched clock: `field(default_factory=time.time)` binds the
+    # real `time.time` FUNCTION OBJECT once, at `app.models` import time --
+    # patching the `time` module's `time` attribute afterwards (the
+    # technique tests/test_ledger.py uses) has no effect on a `Run`'s own
+    # default at all, only on code that looks `time.time` up dynamically
+    # inside a function body at call time, the way `Repo.claim_run`'s own
+    # restamp does. An explicit, real "an hour ago" timestamp is simpler,
+    # deterministic, and sidesteps that distinction entirely.
+    repo.put_workspace(Workspace(id="ws1", name="Acme", repo="acme/site"))
+    an_hour_ago = time.time() - 3600.0
+    queued_run = Run(id="r1", workspace_id="ws1", number=1, trigger="manual", started_at=an_hour_ago)
+    repo.put_run(queued_run)
+
+    orch = _bare_orch(repo, pages={"/": {"error": "404"}})  # empty app -> fast, deterministic finish
+    result = orch.execute("r1")
+
+    assert result.state == "finished"
+    # Without the fix, duration would be computed from an_hour_ago and come
+    # out near 3,600,000ms. With it, only real post-claim execution time
+    # (milliseconds, running entirely against in-memory fakes) is counted.
+    assert result.duration_ms < 5000
 
 
 # --- stub-driven edge cases -------------------------------------------
@@ -315,14 +380,16 @@ def test_an_agent_that_returns_none_is_a_recorded_error_not_a_crash(repo, run):
 
 def test_no_routes_stops_early_and_says_why(repo, run):
     # The REAL Cartographer, pointed at a page that 404s -- a genuinely
-    # empty crawl, not a stub standing in for one.
+    # empty crawl, not a stub standing in for one. Sentinel still runs
+    # first (unconditionally, fix round 1), so this is 2 steps now, not 1
+    # -- the short circuit is about Cartographer finding nothing, not
+    # about nothing having run before it.
     orch = _bare_orch(repo, pages={"/": {"error": "404 not found"}})
     orch.execute(run.id)
     assert orch._repo.run(run.id).state == "finished"
     steps = orch._repo.steps_for_run(run.id)
-    assert len(steps) == 1
-    assert steps[0].agent == "cartographer"
-    assert "unreachable" in steps[0].detail
+    assert [s.agent for s in steps] == ["sentinel", "cartographer"]
+    assert "unreachable" in steps[-1].detail
 
 
 def test_a_clean_run_skips_triager_and_surgeon(repo, run):
@@ -350,11 +417,38 @@ def test_sentinel_runs_first_when_an_incident_is_open(repo, run):
     assert agents[0] == "sentinel"
 
 
-def test_sentinel_is_silently_absent_with_no_open_incidents(repo, run):
+def test_sentinel_runs_and_writes_a_step_even_with_no_open_incidents(repo, run):
+    # Fix round 1: Sentinel's own precondition gate is gone. "No incidents"
+    # is no longer indistinguishable from "the precondition check never
+    # ran Sentinel at all" -- there is no longer a precondition check.
     orch = _bare_orch(repo, pages={"/": {"error": "404"}})
     orch.execute(run.id)
-    agents = [s.agent for s in orch._repo.steps_for_run(run.id)]
-    assert "sentinel" not in agents
+    steps = orch._repo.steps_for_run(run.id)
+    assert steps[0].agent == "sentinel"
+    assert steps[0].outcome == "ok"
+    assert "No open incidents" in steps[0].summary
+
+
+def test_the_step_list_distinguishes_no_incidents_from_sentinel_never_running(repo, run):
+    # Sentinel occupies the SAME position and agent name whether or not an
+    # incident is open -- the only thing that ever changes is the content
+    # of its own step, which is exactly the record a reader needs to tell
+    # "Sentinel ran and genuinely found nothing" apart from "Sentinel never
+    # ran" (a state that, after this fix, cannot occur at all: a bug in
+    # some future precondition-like check can no longer masquerade as
+    # "no incidents today", because there is no longer a precondition
+    # standing between Sentinel and running).
+    no_incident_step = orch_first_step_for_a_fresh_run(repo, run.id)
+    assert no_incident_step.agent == "sentinel"
+    assert "No open incidents" in no_incident_step.summary
+
+    repo.put_incident(Incident(id="inc1", workspace_id="ws1", source="sentry",
+                                message="checkout crashed", url="/checkout", status="open"))
+    run2 = Run(id="r2", workspace_id="ws1", number=2, trigger="manual")
+    repo.put_run(run2)
+    with_incident_step = orch_first_step_for_a_fresh_run(repo, run2.id)
+    assert with_incident_step.agent == "sentinel"
+    assert "No open incidents" not in with_incident_step.summary
 
 
 # --- Oracle: conditional on a second environment --------------------------
