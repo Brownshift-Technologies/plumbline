@@ -204,6 +204,20 @@ the Gemini line.
 
 **Do not narrate the URLs.** Let the address bar do it.
 
+## B7a. When you say *"Plumbline is an MCP server..."*
+
+Nothing to click. Say it over the ledger, which is already on screen.
+
+**Why not show it:** an MCP handshake is JSON-RPC over a terminal, and a
+terminal on screen for fifteen seconds reads as filler in a four-minute video.
+The claim is verifiable in the repo (`app/mcp_server.py`, `app/mcp_tools.py`,
+`agents/mcp_client.py`) and in `ARCHITECTURE.md`, which is where a judge who
+cares will look. Say it and keep the ledger up.
+
+If you do want it on screen, the honest shot is the tool manifest: eight tools,
+with `plumbline_approve_patch` visible to an owner key and absent from a
+reader's manifest. That is the role filter doing something you can see.
+
 ## B7. When you say *"Every decision that gate made is here..."*
 
 Back to tab 1. Click **Audit ledger**, then click **Verify chain**.

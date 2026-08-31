@@ -118,6 +118,58 @@ can propose deleting something and cannot itself act on that proposal.
 `payments/*` path is what stops it from ever being exercised without a human. That's the
 demo's strongest beat, see `DEMO_SCRIPT.md`.
 
+## MCP, in both directions
+
+Plumbline is an MCP server, and its agents are MCP clients. Both sides go
+through the Gateway, which is the only reason either is safe to offer.
+
+**As a server** (`app/mcp_server.py`, `app/mcp_tools.py`). `POST /mcp` speaks
+JSON-RPC and `GET /mcp` streams over SSE, authenticated with the same hashed
+API keys the public `/v1/` surface uses. Eight tools:
+
+| Tool | Does |
+|---|---|
+| `plumbline_run_tests` | Start a run |
+| `plumbline_get_run` | A run and its steps |
+| `plumbline_list_findings` | Open findings |
+| `plumbline_get_finding` | One finding and its patch |
+| `plumbline_get_coverage` | The route graph and what is uncovered |
+| `plumbline_write_behaviour` | Add a behaviour in plain English |
+| `plumbline_verify_ledger` | Walk the hash chain |
+| `plumbline_approve_patch` | Approve a gated patch |
+
+`visible_tools(role)` filters the manifest by the calling key's role, so a
+reader's client never sees `plumbline_approve_patch` in its tool list at all,
+rather than seeing it and being refused on call. The refusal still happens
+server-side; hiding it is about not tempting a model into a call it cannot
+make.
+
+**As a client** (`agents/mcp_client.py`). `McpToolSource` knows how to speak
+JSON-RPC to a customer's own MCP server and nothing else. It has no knowledge
+of `Gateway.call`, deliberately: an agent makes an MCP call the same way it
+makes any other call,
+
+```python
+ctx.gateway.call(
+    ctx.workspace_id, "chaos", f"mcp.{server}.{tool_name}",
+    target=tool_name, payload=args,
+    fn=lambda: mcp_source.call(server, tool_name, args),
+)
+```
+
+so an MCP tool gets scope checking (`mcp.<server>` against the calling agent's
+own `SCOPES` entry), a ledger entry, an OTel span, and PII redaction on the way
+back. `Gateway.call` redacts every `mcp.*` result unconditionally rather than
+only ones whose tool name ends in `.read`, because a customer's server names
+its own tools and we do not get to assume a naming convention means anything.
+
+**A discovered tool is untrusted input.** `discover()` runs every manifest
+entry's name and description through `core.guards.check_input`, the same
+scanner the Gateway already runs over a payload. A tool description is text a
+third party controls that ends up in an agent's prompt, which is the whole
+shape of an MCP tool-poisoning attack. Screening the manifest is not optional
+once you let customers point agents at servers you did not write.
+
 ## `core/`: absorbed, not vendored
 
 `core/` (`config`, `store`, `events`, `gemini`, `guards`, `telemetry`, `web`) is Plumbline's

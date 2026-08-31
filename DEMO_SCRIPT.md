@@ -2,9 +2,10 @@
 
 `DEMO_STEPS.md` says where you switch screens and what you should see on each.
 
-Read straight through. Five hundred spoken words. That is about
-three minutes at a brisk pace, against a hard three-minute cap, so do not slow
-down for effect. Practise it once against a timer before you record.
+Read straight through. Five hundred and eighty-four spoken words. That is about
+three fifty at a brisk pace, against a hard four-minute cap. The cap is hard,
+so do not slow down for effect. Practise it once against a timer before you
+record.
 
 ---
 
@@ -15,23 +16,23 @@ morning, so the app retries. And because the retry sends a new idempotency key
 instead of reusing the old one, the customer is charged twice.
 
 Nobody wrote a test for that, because it only happens when the provider is
-slow, and writing a test that makes a provider slow on purpose is tedious work
-that gets pushed to next sprint, every sprint. That is the problem. It is not
-that teams do not test. It is that the tests nobody writes are the ones that
-catch the expensive bugs.
+slow, and writing a test that makes a provider slow on purpose gets pushed to
+next sprint, every sprint. That is the problem. It is not that teams do not
+test. It is that the tests nobody writes are the ones that catch the expensive
+bugs.
 
 Anyone can try this. No account, no card. Teams sign in with email, or with
-GitHub, Google or their own single sign-on, but you do not need any of that to
-look around.
+GitHub, Google or their own single sign-on, but you need none of it to look
+around.
 
-This is a real workspace of your own, and it is still here when you come back.
-Eleven agents, and one gate that everything they do has to pass through.
+This is a real workspace of your own, still here when you come back. Eleven
+agents, and one gate everything they do passes through.
 
 Because the second problem is the obvious fix. Point an AI at it, and now an
 agent that can write a test can write any file. An agent that can open a pull
 request can merge one. Whether a model can find a bug stopped being the
-interesting question a while ago. The question is what it is allowed to do the
-second it finds one.
+interesting question. The question is what it is allowed to do the second it
+finds one.
 
 Here is that payments bug, found. Cartographer mapped forty-seven routes.
 Author turned plain English into a Playwright spec. Healer re-anchored four
@@ -62,6 +63,13 @@ point five Flash.
 
 Every decision that gate made is here, hash-chained. And you do not have to
 trust it. Verify re-signs every entry and checks it against the next.
+
+One more thing that gate buys us. Plumbline is an MCP server, so your coding
+agent can start a run or read a finding. And our agents are MCP clients, so
+they can call your servers. Both directions go through the same gate, so a tool
+on someone else's server gets the same scope check, the same ledger entry and
+the same redaction as one of ours. We screen the tool descriptions too, because
+a description is text a stranger wrote that ends up in our prompt.
 
 Eleven agents, one gate, and a person signing off before anything real changes.
 
