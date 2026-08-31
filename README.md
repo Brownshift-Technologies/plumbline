@@ -1,5 +1,7 @@
 # Plumbline
 
+By **Brownshift Technology**.
+
 An agentic software testing and reliability platform. Eleven scoped agents map a customer's
 app, write behaviours against it in plain English, repair them as the UI drifts, break the
 app on purpose to find what nobody tested, run everything in parallel with no model in the

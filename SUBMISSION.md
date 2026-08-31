@@ -12,6 +12,7 @@ Everything below is ready to paste. Facts verified against the deployed app and 
 | **Try it out** | https://plumbline-api-cxotjai2ta-uc.a.run.app |
 | **Repository** | https://github.com/rogerkoranteng-crypto/plumbline |
 | **Video** | *(paste the YouTube/Vimeo URL once uploaded; must be public or unlisted, never private)* |
+| **Built by** | Brownshift Technology |
 | **Category** | Fortified Enterprise Fleet |
 | **Also entering** | Startup Excellence |
 
@@ -33,8 +34,10 @@ Eleven governed agents that test your software, find the bug nobody wrote a test
 
 ## Inspiration
 
-I have watched the same three things go wrong on every team I have worked on that ships
-quickly.
+We are Brownshift Technology, and Plumbline is what we are building.
+
+The starting point was three things we have watched go wrong on every team we have worked on
+that ships quickly.
 
 Someone writes the tests by hand, against a UI that changes every sprint, so the suite rots
 faster than anyone repairs it. Nobody writes tests for the failure paths, because writing a
@@ -43,9 +46,13 @@ and that coverage simply does not exist. And when something breaks, finding out 
 getting a safe fix reviewed eats a day.
 
 Point an AI at it, obviously. Except that is where the actual problem starts. An agent that
-can write a test can write any file. An agent that can open a pull request can merge one. I
-stopped being interested in whether a model could find a bug pretty early on. What kept me
-up was the next second: it found one, now what is it allowed to do about it?
+can write a test can write any file. An agent that can open a pull request can merge one.
+Whether a model can find a bug stopped being the interesting question early on. What kept us
+up was the next second: it found one, so now what is it allowed to do about it?
+
+That question is the company. Plenty of people are building agents that write tests. We are
+building the part that decides what those agents may touch, proves what they did, and stops
+them at a human before anything real changes.
 
 ## What it does
 

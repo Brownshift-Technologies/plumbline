@@ -5,6 +5,7 @@ label, button and number below was read off the deployed app on 2026-08-31. If
 something here does not match what you see, this file is stale — fix the file,
 do not improvise on camera.
 
+**Product:** Plumbline, by **Brownshift Technology**
 **Live:** https://plumbline-api-cxotjai2ta-uc.a.run.app
 **Repo:** https://github.com/rogerkoranteng-crypto/plumbline
 
@@ -28,18 +29,38 @@ hash-chained ledger, and the Vertex AI calls.
 
 ---
 
-## 0:00-0:25 — The friction
+## 0:00-0:30 — The problem, and who is solving it
 
-> "If you ship fast you already know how this goes. Someone writes the tests by
-> hand against a UI that changes every sprint, so the suite rots faster than
-> anyone repairs it. Nobody writes tests for the failure paths, because writing
-> a test for 'what if the payment provider takes 240 milliseconds too long' is
-> boring, so that coverage just doesn't exist. And when something breaks,
-> working out why and getting a safe fix reviewed eats a day."
+Say this over the sign-in screen, before you click anything.
+
+> "Every team that ships quickly has the same three problems with testing, and
+> they compound.
+>
+> Someone writes the tests by hand, against a UI that changes every sprint, so
+> the suite rots faster than anyone can repair it. Nobody writes tests for the
+> failure paths, because writing a test for 'what if the payment provider takes
+> 240 milliseconds too long' is tedious, so that coverage simply does not exist
+> — and that is exactly where the expensive bugs live. And when one of them does
+> reach production, working out why and getting a safe fix reviewed eats a day
+> that nobody had.
+>
+> The obvious answer is to point an AI at it. That is also where the real
+> problem starts. An agent that can write a test can write any file. An agent
+> that can open a pull request can merge one. Whether a model can find a bug
+> stopped being the interesting question a while ago. The question is what it is
+> allowed to do the second it finds one.
+>
+> We are **Brownshift Technology**, and we are building **Plumbline**: eleven
+> scoped agents that test your software, root-cause what they break, and open
+> the pull request they are not permitted to merge. Every tool call they make
+> passes through one gate, and every decision that gate makes is written to a
+> ledger you can verify yourself."
+
+**Then click `Open the live demo`.**
 
 ---
 
-## 0:25-0:45 — Home
+## 0:30-0:50 — Home
 
 **Screen: Home.** You are already here after opening the demo.
 
@@ -57,7 +78,7 @@ Point at **Needs your attention**: *"Waiting on you since..."* and
 
 ---
 
-## 0:45-1:10 — Google Cloud proof shot (Stage One requirement)
+## 0:50-1:10 — Google Cloud proof shot (Stage One requirement)
 
 Tab B, then C, then back to A. Name what is on screen, nothing more.
 
@@ -188,7 +209,7 @@ Show the result.
 ## 2:55-3:00 — Close
 
 > "Eleven agents, one gate they all pass through, and a person signing off
-> before anything real changes. That's Plumbline."
+> before anything real changes. That's Plumbline, by Brownshift Technology."
 
 Leave the URL on screen.
 
