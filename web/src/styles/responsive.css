@@ -47,6 +47,16 @@
     pointer-events: none;
   }
 
+  /* Home's quick-action cards. `.grid5`/`.grid3` (base.css) are fixed
+     5- and 3-column grids, and only the <760px band below collapsed them.
+     768px lands in THIS band, so five 1fr columns plus four 13px gaps left
+     each card ~121px -- narrower than the 38px tile + label it has to hold
+     -- and the row overflowed the viewport (scrollWidth 851 vs clientWidth
+     768). Three and two columns keep every card wide enough to hold its
+     content at the narrow end of this band. */
+  .grid5 { grid-template-columns: repeat(3, 1fr); }
+  .grid3 { grid-template-columns: repeat(2, 1fr); }
+
   .avatar-menu .plan-block { display: block; }
 }
 

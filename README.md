@@ -9,6 +9,21 @@ stopping at a human approval gate before anything merges.
 Built for the **All Things Agentic** hackathon (Google / Devpost), category **Fortified
 Enterprise Fleet**, also entered for **Startup Excellence**.
 
+## Try it
+
+**https://plumbline-api-cxotjai2ta-uc.a.run.app** — click **Open the live demo**. No
+account, no Google sign-in, nothing to install.
+
+The demo issues a real session against a *per-session sandbox*: your own workspace, seeded
+with routes, runs, findings and a patch waiting at an approval gate. It is writable — create
+a behaviour, approve the gated patch, start a run — and nothing you do is visible to anyone
+else clicking the same link. Sessions expire after two hours.
+
+What the demo cannot do, by design: reach a real repository, a live environment, or an
+outbound webhook. For that, connect a GitHub repo in **Settings** and Plumbline clones it,
+writes real spec files, and opens a real pull request on a branch — never on your default
+branch, and never merged without a human.
+
 See `ARCHITECTURE.md` for the full design and the diagram (`plumbline-architecture.svg`),
 `DEMO_SCRIPT.md` for the video script, and `BLOG.md` for how it was built.
 

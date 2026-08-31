@@ -49,16 +49,20 @@ test("changing your password signs the other session out, everywhere else", asyn
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
 
   // Session B's cookie is now for a revoked session -- the API boundary
-  // half of this flow, independent of whatever the UI happens to render
-  // for a 401 (there is no global redirect-to-signin on 401 today, see
-  // task-17f-report.md).
+  // half of this flow, asserted independently of whatever the UI renders.
   const meResponse = await otherPage.request.get("/api/auth/me");
   expect(meResponse.status()).toBe(401);
 
-  // And the UI boundary half: reloading session B's already-open page
-  // surfaces that failure rather than pretending the account is still there.
+  // And the UI boundary half. This used to assert "Couldn't load your
+  // account" rendered inside the shell; RequireSession now sends any
+  // session the server rejects to /signin instead, which is the better
+  // answer -- a revoked session should land somewhere it can sign back
+  // in, not on a dead screen with an error on it.
   await otherPage.reload();
-  await expect(otherPage.getByText("Couldn't load your account")).toBeVisible();
+  await expect(otherPage).toHaveURL(/\/signin$/);
+  await expect(
+    otherPage.getByRole("heading", { name: "Sign in to Plumbline" }),
+  ).toBeVisible();
 
   await otherContext.close();
 
