@@ -13,7 +13,7 @@ import time
 
 import pytest
 
-from app.models import Run, Step, Workspace
+from app.models import Finding, Run, Step, Workspace
 
 
 @pytest.fixture(autouse=True)
@@ -145,6 +145,48 @@ def test_listing_runs_filters_by_state(client_as_owner, repo):
 
 def test_getting_a_run_from_another_workspace_is_404(client_as_owner, repo):
     _make_run(repo, workspace_id="ws-someone-else", number=1, state="finished")
+    r = client_as_owner.get("/api/runs/run_1")
+    assert r.status_code == 404
+
+
+# --- finding_id: the approval-gate link -------------------------------------
+
+
+def test_the_run_detail_response_carries_its_finding_id(client_as_owner, repo):
+    """The bug this closes: nothing in this route's response ever named the
+    finding a run produced, so `RunDetail.tsx`'s `findingId` was always
+    `null` and the "Approve and merge" button never rendered. See
+    `app/repo.py`'s `finding_for_run` and `app/run_routes.py`'s module
+    docstring."""
+    _make_run(repo, number=1, state="finished")
+    repo.put_finding(Finding(
+        id="fnd_1", workspace_id="ws1", title="A retried payment charges twice",
+        route="/checkout/payment", found_by="triager", run_id="run_1",
+    ))
+    r = client_as_owner.get("/api/runs/run_1")
+    assert r.status_code == 200
+    assert r.json()["finding_id"] == "fnd_1"
+
+
+def test_a_run_with_no_finding_returns_null_not_an_error(client_as_owner, repo):
+    _make_run(repo, number=1, state="finished")
+    r = client_as_owner.get("/api/runs/run_1")
+    assert r.status_code == 200
+    assert r.json()["finding_id"] is None
+
+
+def test_a_run_from_another_workspace_still_404s(client_as_owner, repo):
+    """Regression guard alongside `test_getting_a_run_from_another_
+    workspace_is_404`: adding the `finding_for_run` lookup to this route
+    must not change what happens before it even runs -- the tenancy check
+    still 404s a foreign-workspace run before any finding lookup, even
+    when that run has a linked finding sitting right there in the
+    store."""
+    _make_run(repo, workspace_id="ws-someone-else", number=1, state="finished")
+    repo.put_finding(Finding(
+        id="fnd_1", workspace_id="ws-someone-else", title="not this workspace's problem",
+        route="/checkout/payment", found_by="triager", run_id="run_1",
+    ))
     r = client_as_owner.get("/api/runs/run_1")
     assert r.status_code == 404
 

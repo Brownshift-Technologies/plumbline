@@ -328,6 +328,15 @@ class Finding:
     seed: str = ""
     repro_count: int = 0
     at: float = field(default_factory=time.time)
+    # The run whose trace produced this finding -- Task "close the
+    # approval gate" territory. Default "" (not `None`) so every existing
+    # row and every test that builds a `Finding` without naming a run
+    # keeps working unchanged; only `agents/triager.py` (the one agent
+    # that turns a run's failure into a `Finding`) sets it on every new
+    # row it writes. This is the field `Repo.finding_for_run` and
+    # `GET /api/runs/{id}`'s `finding_id` are both built on -- see
+    # `app/run_routes.py` and `app/repo.py`.
+    run_id: str = ""
 
 
 @dataclass(frozen=True)

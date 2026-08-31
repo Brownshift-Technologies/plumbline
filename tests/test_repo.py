@@ -133,6 +133,53 @@ def test_patch_for_finding_round_trips():
     assert r.patch_for_finding("f1").id == "p1"
 
 
+# --- finding_for_run: the approval-gate link --------------------------------
+
+
+def test_finding_for_run_returns_the_finding_that_run_produced():
+    r = _repo()
+    r.put_finding(
+        Finding(id="f1", workspace_id="ws1", title="a bug", route="/a",
+                found_by="triager", run_id="run_1")
+    )
+    assert r.finding_for_run("run_1").id == "f1"
+
+
+def test_finding_for_run_with_no_finding_returns_none():
+    r = _repo()
+    assert r.finding_for_run("run_nobody_wrote") is None
+
+
+def test_finding_for_run_breaks_ties_on_severity_worst_first():
+    r = _repo()
+    r.put_finding(Finding(id="f_low", workspace_id="ws1", title="minor", route="/a",
+                           found_by="triager", run_id="run_1", severity="low"))
+    r.put_finding(Finding(id="f_critical", workspace_id="ws1", title="severe", route="/a",
+                           found_by="triager", run_id="run_1", severity="critical"))
+    r.put_finding(Finding(id="f_medium", workspace_id="ws1", title="middling", route="/a",
+                           found_by="triager", run_id="run_1", severity="medium"))
+    assert r.finding_for_run("run_1").id == "f_critical"
+
+
+def test_finding_for_run_does_not_scan_the_whole_workspace(monkeypatch):
+    """`finding_for_run` must query the dedicated `run_id` field, not read
+    every finding in the workspace and filter client-side -- the same
+    discipline `steps_for_run` already applies to `Step.run_id`. Breaking
+    `findings_for_workspace` here proves the read path this test targets
+    never goes through it."""
+    r = _repo()
+    r.put_finding(
+        Finding(id="f1", workspace_id="ws1", title="a bug", route="/a",
+                found_by="triager", run_id="run_1")
+    )
+
+    def _boom(self, wid):
+        raise AssertionError("finding_for_run must not scan the whole workspace")
+
+    monkeypatch.setattr(Repo, "findings_for_workspace", _boom)
+    assert r.finding_for_run("run_1").id == "f1"
+
+
 def test_patch_for_finding_is_none_when_no_patch_exists():
     assert _repo().patch_for_finding("nope") is None
 

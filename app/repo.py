@@ -311,6 +311,47 @@ class Repo:
         rows = [Finding(**r) for r in self._store.query("findings", "workspace_id", "==", wid)]
         return sorted(rows, key=lambda f: f.at, reverse=True)
 
+    # `_SEVERITY_RANK` -- fewest-surprises tiebreak for `finding_for_run`
+    # below. Mirrors `agents/oracle.py`'s own `critical > high > medium >
+    # low` ordering (see `_severity`/`public_routes.py`'s `Field(...,
+    # description="low | medium | high | critical")`) rather than
+    # inventing a second ranking for the same four strings.
+    _SEVERITY_RANK: dict[str, int] = {"critical": 3, "high": 2, "medium": 1, "low": 0}
+
+    def finding_for_run(self, run_id: str) -> Finding | None:
+        """The `Finding` the run `run_id` produced, or `None` if it produced
+        none -- what `GET /api/runs/{id}` reads to fill in `finding_id`
+        (see `app/run_routes.py`).
+
+        Queried by `run_id`, a dedicated indexed field, not a
+        `findings_for_workspace` scan filtered client-side: a workspace
+        can hold thousands of findings across thousands of runs, and this
+        route is read on every single run-detail page view, not once per
+        deploy -- the same "query the field you actually need, don't scan
+        and filter" discipline `steps_for_run` already applies to
+        `Step.run_id`. See `test_finding_for_run_does_not_scan_the_whole_
+        workspace`.
+
+        A run only ever produces one `Finding` today (`agents/triager.py`
+        writes at most one Finding per candidate spec per run, and
+        `enqueue_run` gives every run its own id) but nothing in the data
+        model actually forbids a workspace from somehow ending up with
+        more than one row sharing a `run_id` -- a replayed write under a
+        different key, a future agent that triages more than one
+        candidate onto the same reported id, etc. Rather than let that
+        be undefined ("whichever one Firestore happens to return first"),
+        ties break on severity, worst first (`_SEVERITY_RANK`): the
+        finding this route surfaces is the one a caller most needs to see
+        before anything else, and "worse" is the one property a
+        `Finding` actually carries that speaks to that -- `at` (recency)
+        says nothing about which is more worth a human's attention.
+        """
+        rows = self._store.query("findings", "run_id", "==", run_id)
+        if not rows:
+            return None
+        findings = [_rebuild(Finding, r) for r in rows]
+        return max(findings, key=lambda f: self._SEVERITY_RANK.get(f.severity, -1))
+
     def put_patch(self, p: Patch) -> None:
         self._store.put("patches", p.id, to_dict(p))
 

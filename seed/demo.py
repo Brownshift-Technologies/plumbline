@@ -176,10 +176,19 @@ def _seed_findings_and_patch(repo, ws_id: str) -> dict[str, Finding]:
     now = time.time()
     findings: dict[str, Finding] = {}
     for key, title, route, found_by, status, severity, repro, age_seconds in _FINDINGS:
+        # "double_charge" is run 4471's own finding -- the run whose
+        # Triager step ("reproduced it 5 times out of 5", see
+        # `_RUN_4471_STEPS`) is what actually produced this row, and the
+        # single most important link in the whole demo: without it,
+        # `GET /api/runs/{run_demo_4471}` has no `finding_id`, RunDetail
+        # never fetches the gated patch below, and "Approve and merge"
+        # never renders -- see `test_the_seeded_run_4471_links_to_the_
+        # gated_double_charge_finding` in `tests/test_seed_demo.py`.
+        run_id = "run_demo_4471" if key == "double_charge" else ""
         finding = Finding(
             id=f"finding_{key}", workspace_id=ws_id, title=title, route=route,
             found_by=found_by, status=status, severity=severity, repro_count=repro,
-            at=now - age_seconds,
+            at=now - age_seconds, run_id=run_id,
         )
         repo.put_finding(finding)
         findings[key] = finding

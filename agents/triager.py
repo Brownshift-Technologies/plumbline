@@ -57,7 +57,12 @@ Three gateway calls at most per run, none of them per item:
    (flaky or deterministic alike), in one call, keyed on `(workspace_id,
    spec_path)` (`_finding_id`) so re-running Triager against an unchanged
    failure overwrites its own prior Finding rather than accumulating a
-   duplicate (`test_re_running_does_not_duplicate_the_finding`). Two
+   duplicate (`test_re_running_does_not_duplicate_the_finding`). Every
+   Finding written here also carries `run_id=ctx.run_id` -- this is the
+   only agent that turns a run's failure into a Finding, so it is the
+   only place that link can honestly be made; `Repo.finding_for_run` and
+   `GET /api/runs/{id}`'s `finding_id` are both read straight off this
+   field (see `app/repo.py` and `app/run_routes.py`). Two
    DIFFERENT specs that happen to share one underlying bug still get two
    separate Findings -- this module has no way to know two specs share a
    root cause short of comparing the model's own prose (unreliable, and not
@@ -227,7 +232,7 @@ class Triager:
                               f"({c['repro_count']} of {self.attempts} attempts failed)",
                         route="", found_by=self.name, status="needs_repro",
                         severity="medium", seed=_seed_for(ctx.workspace_id, c["spec_path"]),
-                        repro_count=c["repro_count"],
+                        repro_count=c["repro_count"], run_id=ctx.run_id,
                     ))
                 for c in deterministic:
                     ctx.repo.put_finding(Finding(
@@ -236,7 +241,7 @@ class Triager:
                         title=root_causes[c["spec_path"]][:200],
                         route="", found_by=self.name, status="triaged",
                         severity="high", seed=_seed_for(ctx.workspace_id, c["spec_path"]),
-                        repro_count=c["repro_count"],
+                        repro_count=c["repro_count"], run_id=ctx.run_id,
                     ))
                 return len(flaky) + len(deterministic)
 

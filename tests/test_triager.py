@@ -143,6 +143,17 @@ def test_the_seed_is_carried_onto_the_finding(ctx):
     assert ctx.repo.findings_for_workspace("ws1")[0].seed == out.data["seed"]
 
 
+def test_a_finding_records_the_run_that_produced_it(ctx):
+    """The approval gate this product's demo is built around only reaches
+    the UI because a `Finding` remembers which `Run` produced it -- see
+    `app/repo.py`'s `finding_for_run` and `app/run_routes.py`'s
+    `finding_id`. `ctx`'s own `make_ctx` default is `run_id="r1"`."""
+    Triager(attempts=5).run(ctx)
+    finding = ctx.repo.findings_for_workspace("ws1")[0]
+    assert finding.run_id == "r1"
+    assert ctx.repo.finding_for_run("r1").id == finding.id
+
+
 # --- point 4: a policy block must surface as an error, not a silent no-op --
 
 

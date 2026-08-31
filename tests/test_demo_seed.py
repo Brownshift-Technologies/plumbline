@@ -73,6 +73,28 @@ def test_run_4471_carries_its_seven_step_reasoning_chain(repo, config):
     assert steps[-1].outcome == "gated"
 
 
+def test_the_seeded_run_4471_links_to_the_gated_double_charge_finding(repo, config):
+    """The single most important path in the demo: a judge opens run 4471
+    and must see the gated double-charge patch behind "Approve and
+    merge". That only happens if `GET /api/runs/{run_4471_id}` can name
+    the finding it produced -- which means the seed itself has to set
+    `Finding.run_id`, not just write both rows unlinked next to each
+    other. See `app/repo.py`'s `finding_for_run` and
+    `app/run_routes.py`'s `finding_id`."""
+    from seed.demo import seed_demo
+
+    ws = seed_demo(repo, config)
+    run = next(r for r in repo.runs_for_workspace(ws.id) if r.number == 4471)
+
+    finding = repo.finding_for_run(run.id)
+    assert finding is not None
+    assert "twice" in finding.title
+
+    patch = repo.patch_for_finding(finding.id)
+    assert patch is not None
+    assert patch.gate_state == "awaiting_approval"
+
+
 def test_reseeding_restores_the_pristine_fixture(repo, config):
     """`seed_demo` is called again on every FRESH `POST /api/auth/demo`
     entry (`app/main.py`'s `seed_demo_if_missing`) -- never mid-session

@@ -56,6 +56,16 @@ Judgement calls (see task-14a-15-report.md for the fuller writeup):
 - `limit` is clamped to `_MAX_PAGE_SIZE` regardless of what is requested
   -- `?limit=100000` gets the max, not an attempt to hand back the whole
   collection in one response.
+
+**`GET /api/runs/{id}`'s `finding_id`.** The approval gate this product's
+whole demo is built around lives behind `web/src/pages/RunDetail.tsx`
+fetching `/findings/{id}` and `/findings/{id}/patch` -- but that page can
+only do that once it has a finding id, and until now nothing in this
+route's response ever carried one, so the fetch (and the "Approve and
+merge" button it gates) never ran. `finding_id` here is
+`repo.finding_for_run(run_id).id`, or `None` when this run produced no
+finding -- see `app/repo.py`'s `finding_for_run` for the query itself and
+its severity tiebreak.
 """
 
 import asyncio
@@ -238,7 +248,11 @@ def get_run(run_id: str, request: Request, sess=Depends(current_session)):
         # caller enumerate run ids across tenants by status code alone.
         raise HTTPException(404, "no such run")
     steps = repo.steps_for_run(run_id)
-    return {"run": _run_json(run), "steps": [_step_json(s) for s in steps]}
+    finding = repo.finding_for_run(run_id)
+    return {
+        "run": _run_json(run), "steps": [_step_json(s) for s in steps],
+        "finding_id": finding.id if finding else None,
+    }
 
 
 @router.post("/{run_id}/cancel")
