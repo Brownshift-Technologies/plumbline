@@ -155,14 +155,15 @@ def test_a_refusal_explains_why_rather_than_saying_nothing_was_saved(client):
     assert "In the demo" not in body["reason"]
 
 
-def test_an_expired_demo_workspace_is_cleaned_up(client, repo):
+def test_an_abandoned_demo_workspace_is_cleaned_up(client, repo):
     from app.sessions import DEMO_TTL_SECONDS
 
     ws_id = client.post("/api/auth/demo").json()["workspace_id"]
     workspace = repo.workspace(ws_id)
-    # Backdate it past its 2-hour window -- the sweep's own cutoff.
+    # Nobody has opened it for a full session lifetime, so no live cookie
+    # can still name it -- unreachable garbage, not somebody's workspace.
     repo.put_workspace(type(workspace)(**{
-        **workspace.__dict__, "created_at": time.time() - DEMO_TTL_SECONDS - 10,
+        **workspace.__dict__, "last_seen_at": time.time() - DEMO_TTL_SECONDS - 10,
     }))
 
     deleted = client.app.state.sweep_expired_demo_workspaces(limit=10)
@@ -171,3 +172,30 @@ def test_an_expired_demo_workspace_is_cleaned_up(client, repo):
     assert repo.workspace(ws_id) is None
     assert repo.routes_for_workspace(ws_id) == []
     assert repo.behaviours_for_workspace(ws_id) == []
+
+
+def test_an_old_sandbox_someone_still_opens_is_never_cleaned_up(client, repo):
+    """The distinction the whole sweep turns on.
+
+    A sandbox created a year ago but opened this morning belongs to a
+    returning visitor whose cookie is still live. Reaping on `created_at`
+    -- which is what this used to do -- would have deleted their
+    behaviours, runs and approvals out from under them.
+    """
+    from app.sessions import DEMO_TTL_SECONDS
+
+    ws_id = client.post("/api/auth/demo").json()["workspace_id"]
+    workspace = repo.workspace(ws_id)
+    repo.put_workspace(type(workspace)(**{
+        **workspace.__dict__,
+        "created_at": time.time() - DEMO_TTL_SECONDS * 3,  # ancient
+        "last_seen_at": time.time() - DEMO_TTL_SECONDS * 3,
+    }))
+
+    # Opening it again is what marks it as still in use.
+    returning = client.post("/api/auth/demo").json()
+    assert returning["workspace_id"] == ws_id
+    assert returning["returning"] is True
+
+    assert client.app.state.sweep_expired_demo_workspaces(limit=10) == 0
+    assert repo.workspace(ws_id) is not None

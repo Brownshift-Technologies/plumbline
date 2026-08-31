@@ -23,7 +23,15 @@ import time
 from app.models import Session
 from app.security import new_token
 
-DEMO_TTL_SECONDS = 2 * 3600
+# A demo sandbox is meant to behave like an account you can come back to,
+# not a two-hour trial: a visitor who returns days later should land in the
+# workspace they already built, with their behaviours, runs and approvals
+# still in it. The cookie is the ONLY thing that can identify a returning
+# demo visitor -- there are no demo credentials to sign back in with -- so
+# the session lifetime IS the sandbox lifetime. A year is the practical
+# ceiling browsers honour for a persistent cookie; nothing deletes the
+# workspace behind it.
+DEMO_TTL_SECONDS = 365 * 86400
 
 
 class SessionService:
@@ -40,12 +48,11 @@ class SessionService:
         user_agent: str = "",
         ip_city: str = "",
     ) -> Session:
-        # Demo sessions always get the fixed 2h cap, never
-        # config.session_ttl_days -- a demo session must not be able to
-        # outlive its cap just because an operator raises the ordinary TTL
-        # for real tenants. The two branches are independent on purpose;
-        # this is not "min(demo_ttl, configured_ttl)", it is "demo ignores
-        # the config entirely".
+        # Demo sessions get their own fixed lifetime, never
+        # config.session_ttl_days. The two branches are independent on
+        # purpose; this is not "min(demo_ttl, configured_ttl)", it is
+        # "demo ignores the config entirely" -- an operator tuning the
+        # tenant TTL must not shorten (or lengthen) a demo sandbox.
         ttl = DEMO_TTL_SECONDS if is_demo else self._config.session_ttl_days * 86400
         sess = Session(
             id=new_token(),

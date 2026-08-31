@@ -23,7 +23,7 @@ test.describe("the demo door", () => {
     // here is saved" was a lie. What is still worth saying is that the
     // sandbox expires.
     await expect(page.getByRole("status").filter({ hasText: "sandbox" })).toContainText(
-      "This is your own live sandbox -- everything you do here really works. It disappears in 2 hours.",
+      "This is your own live sandbox -- everything you do here really works, and it's still here when you come back.",
     );
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
   });
@@ -46,6 +46,44 @@ test.describe("the demo door", () => {
     // just created -- the exact thing the refusal path could never do.
     await expect(page).toHaveURL(/\/runs\/[^/]+$/);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  });
+});
+
+test.describe("the demo sticks", () => {
+  test("coming back through the demo door lands in the same sandbox, with your work in it", async ({ page }) => {
+    await openLiveDemo(page);
+
+    const first = await page.evaluate(async () => {
+      const r = await fetch("/api/auth/me", { credentials: "same-origin" });
+      return r.json();
+    });
+
+    // Write something only this sandbox contains.
+    const text = "A returning visitor still sees this behaviour";
+    const created = await page.evaluate(async (t) => {
+      const r = await fetch("/api/behaviours", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ text: t, route: "/returning" }),
+      });
+      return r.status;
+    }, text);
+    expect(created).toBe(200);
+
+    // Click the demo door a second time, exactly as a returning visitor
+    // would. This used to mint a brand new sandbox and silently orphan
+    // everything above.
+    await openLiveDemo(page);
+
+    const second = await page.evaluate(async () => {
+      const r = await fetch("/api/auth/me", { credentials: "same-origin" });
+      return r.json();
+    });
+    expect(second.workspace_id).toBe(first.workspace_id);
+
+    await page.goto("/behaviours");
+    await expect(page.getByText(text)).toBeVisible();
   });
 });
 

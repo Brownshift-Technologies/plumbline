@@ -55,11 +55,16 @@ def test_revoke_all_except_keeps_only_the_current_one():
     assert s.resolve(other.id) is None
 
 
-def test_a_demo_session_is_flagged_and_short_lived():
+def test_a_demo_session_is_flagged_and_long_lived():
+    # A demo sandbox is meant to be come-back-to-able, like an account:
+    # the cookie is the only handle on it, so the session lifetime IS how
+    # long the sandbox survives. It used to be two hours, which meant a
+    # visitor who returned the next day found their behaviours, runs and
+    # approvals gone -- indistinguishable from data loss.
     s = _svc()
     sess = s.issue("demo", "ws_demo", is_demo=True)
     assert sess.is_demo is True
-    assert sess.expires_at - time.time() <= 2 * 3600 + 5
+    assert sess.expires_at - time.time() > 300 * 86400
 
 
 # --- attacker-shaped tests beyond the brief ---------------------------------
@@ -80,20 +85,24 @@ def test_a_revoked_session_does_not_resolve_via_truthiness_of_the_tombstone():
     assert s.resolve(sess.id) is None
 
 
-def test_a_demo_session_never_outlives_its_cap_even_if_the_config_is_raised():
-    # Demo TTL must ignore session_ttl_days entirely, even when an operator
-    # raises the ordinary TTL to something far larger than 2 hours.
-    s = _svc(session_ttl_days=365)
+def test_a_demo_session_ignores_the_configured_ttl_in_both_directions():
+    # Demo TTL ignores session_ttl_days entirely -- the two branches are
+    # independent, not min()/max(). Asserted with the config set BELOW the
+    # demo lifetime, which is the direction that would silently shorten a
+    # sandbox if the branches were ever merged.
+    s = _svc(session_ttl_days=1)
     sess = s.issue("demo", "ws_demo", is_demo=True)
-    assert sess.expires_at - time.time() <= DEMO_TTL_SECONDS + 5
+    assert abs(sess.expires_at - (time.time() + DEMO_TTL_SECONDS)) < 5
 
 
-def test_an_ordinary_session_does_use_the_raised_config_ttl():
-    # The other side of the same behaviour: a non-demo session is not
-    # accidentally capped the same way -- it does track config.
-    s = _svc(session_ttl_days=365)
+def test_an_ordinary_session_tracks_the_configured_ttl_not_the_demo_one():
+    # The other side of the same behaviour: a non-demo session tracks
+    # config exactly. Compared against the configured value itself rather
+    # than against DEMO_TTL_SECONDS -- the two were both 365 days for a
+    # while, and a comparison between them proved nothing.
+    s = _svc(session_ttl_days=30)
     sess = s.issue("u1", "ws1", is_demo=False)
-    assert sess.expires_at - time.time() > DEMO_TTL_SECONDS
+    assert abs(sess.expires_at - (time.time() + 30 * 86400)) < 5
 
 
 def test_revoke_all_except_a_nonexistent_keep_id_revokes_everything():

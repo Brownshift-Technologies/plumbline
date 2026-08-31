@@ -93,21 +93,53 @@ def test_a_demo_session_cannot_be_escalated_by_calling_signout_then_reusing_the_
     assert client.get("/api/auth/me").status_code == 401
 
 
-def test_repeated_demo_entries_each_get_their_own_independent_session(client):
-    first = client.post("/api/auth/demo")
-    first_sid = first.cookies.get("pl_session")
-    second = client.post("/api/auth/demo")
-    second_sid = second.cookies.get("pl_session")
-    assert first_sid != second_sid
-    # The first session must still be live -- entering demo mode again must
-    # not revoke a previous demo session out from under another tab.
-    assert client.app.state.sessions.resolve(first_sid) is not None
+def test_a_returning_visitor_lands_back_in_the_sandbox_they_already_built(client):
+    """The demo behaves like an account: come back, your work is there.
+
+    Clicking "Open the live demo" again with a live cookie must NOT mint a
+    second sandbox. It used to, and combined with the old two-hour session
+    that meant a returning visitor silently got an empty copy of the
+    fixture -- their behaviours, runs and approvals still in Firestore, in
+    a workspace they no longer had any handle on.
+    """
+    first = client.post("/api/auth/demo").json()
+    first_sid = client.cookies.get("pl_session")
+
+    # Something only this visitor's sandbox contains.
+    created = client.post("/api/behaviours", json={"text": "A refund never double-credits", "route": "/refunds"})
+    assert created.status_code == 200, created.text
+    mine = client.get("/api/behaviours").json()["behaviours"]
+    assert any(b["text"] == "A refund never double-credits" for b in mine)
+
+    second = client.post("/api/auth/demo").json()
+    assert second["workspace_id"] == first["workspace_id"]
+    assert second["returning"] is True
+    assert client.cookies.get("pl_session") == first_sid
+
+    # And the work is still there, which is the whole point.
+    again = client.get("/api/behaviours").json()["behaviours"]
+    assert any(b["text"] == "A refund never double-credits" for b in again)
 
 
-def test_seed_demo_workspace_is_invoked_with_a_fresh_workspace_id_on_every_demo_entry(client):
+def test_a_different_visitor_still_gets_their_own_isolated_sandbox(client):
+    """Reuse is per-cookie, so isolation between visitors is untouched."""
+    first = client.post("/api/auth/demo").json()
+    client.post("/api/behaviours", json={"text": "Only the first visitor wrote this", "route": "/x"})
+
+    client.cookies.clear()  # a different browser entirely
+    second = client.post("/api/auth/demo").json()
+
+    assert second["workspace_id"] != first["workspace_id"]
+    assert second["returning"] is False
+    texts = [b["text"] for b in client.get("/api/behaviours").json()["behaviours"]]
+    assert "Only the first visitor wrote this" not in texts
+
+
+def test_seed_demo_workspace_is_invoked_with_a_fresh_workspace_id_per_visitor(client):
     calls = []
     client.app.state.seed_demo_workspace = lambda workspace_id: calls.append(workspace_id)
     first = client.post("/api/auth/demo")
+    client.cookies.clear()  # each entry is a NEW visitor; a returning one reuses
     second = client.post("/api/auth/demo")
     assert len(calls) == 2
     # Each entry seeds a DIFFERENT id -- see app/auth_routes.py's demo()

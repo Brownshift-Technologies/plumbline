@@ -149,14 +149,27 @@ class Workspace:
     # anything other than `""` or a URL that already passed
     # `agents.cartographer.validate_target_url`.
     target_url: str = ""
-    # A per-session demo sandbox's own timestamp, read by `seed/demo.py`'s
-    # cleanup sweep (`app/main.py`'s `_sweep_expired_demo_workspaces_
-    # factory`) to find workspaces whose 2-hour `DEMO_TTL_SECONDS` window
-    # has passed -- there is no other field on this row that says when it
-    # was created. Every non-demo `Workspace` gets one too (a plain field
-    # default, not a demo-only one) rather than adding a second dataclass
-    # shape just for demo rows; nothing outside the sweep reads it yet.
+    # A per-session demo sandbox's own timestamp. Every non-demo
+    # `Workspace` gets one too (a plain field default, not a demo-only
+    # one) rather than adding a second dataclass shape just for demo rows.
     created_at: float = field(default_factory=time.time)
+    # When this sandbox was last opened. The cleanup sweep
+    # (`app/main.py`'s `_sweep_expired_demo_workspaces_factory`) reaps on
+    # THIS, not on `created_at`.
+    #
+    # That distinction is the whole point. A demo sandbox is meant to
+    # behave like an account -- come back next month and your behaviours,
+    # runs and approvals are still there -- so a sandbox somebody is
+    # actively using must never be collected, however old it is. Reaping
+    # on `created_at` would have deleted a year-old sandbox out from under
+    # a visitor who had opened it that morning. What the sweep is really
+    # for is the other case: `POST /api/auth/demo` is public and
+    # unauthenticated, so abandoned (or maliciously mass-created)
+    # sandboxes would otherwise accumulate in Firestore forever. One
+    # untouched for a full `DEMO_TTL_SECONDS` is provably unreachable --
+    # no cookie that could still name it can be alive -- so it is garbage,
+    # not somebody's workspace.
+    last_seen_at: float = field(default_factory=time.time)
 
 
 @dataclass(frozen=True)

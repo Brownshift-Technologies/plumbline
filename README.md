@@ -17,7 +17,9 @@ account, no Google sign-in, nothing to install.
 The demo issues a real session against a *per-session sandbox*: your own workspace, seeded
 with routes, runs, findings and a patch waiting at an approval gate. It is writable — create
 a behaviour, approve the gated patch, start a run — and nothing you do is visible to anyone
-else clicking the same link. Sessions expire after two hours.
+else clicking the same link. It behaves like an account: come back later, in the same
+browser, and you land in the same sandbox with your behaviours, runs and approvals still
+in it. Sandboxes nobody has opened for a year are collected; one you keep using never is.
 
 What the demo cannot do, by design: reach a real repository, a live environment, or an
 outbound webhook. For that, connect a GitHub repo in **Settings** and Plumbline clones it,

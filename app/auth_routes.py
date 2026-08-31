@@ -10,6 +10,8 @@ frontend needs and nothing it has to reverse-engineer from an HTTP status
 code alone.
 """
 
+import dataclasses
+import time
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -18,6 +20,7 @@ from pydantic import BaseModel, EmailStr
 from app.deps import COOKIE, current_session, demo_refusal
 from app.models import Membership, User
 from app.security import hash_password, verify_password
+from app.sessions import DEMO_TTL_SECONDS
 
 router = APIRouter(prefix="/api/auth")
 
@@ -64,9 +67,15 @@ class ChangePassword(BaseModel):
     new: str
 
 
-def _set_cookie(response: Response, sid: str) -> None:
+def _set_cookie(response: Response, sid: str, max_age: int = 14 * 86400) -> None:
+    # `max_age` has to be able to follow the session's own TTL. A demo
+    # sandbox lives as long as its cookie (there are no demo credentials to
+    # sign back in with, so the cookie is the only handle on it), and a
+    # 14-day cookie over a year-long session would have quietly orphaned
+    # every sandbox after a fortnight -- the workspace still in Firestore,
+    # its owner unable to reach it.
     response.set_cookie(
-        COOKIE, sid, httponly=True, secure=True, samesite="lax", max_age=14 * 86400, path="/"
+        COOKIE, sid, httponly=True, secure=True, samesite="lax", max_age=max_age, path="/"
     )
 
 
@@ -127,6 +136,39 @@ def signin(body: SignIn, request: Request, response: Response):
     return {"id": user.id, "name": user.name, "workspace_id": ws_id}
 
 
+def _touch_demo_workspace(request: Request, workspace_id: str) -> None:
+    """Mark a sandbox as still in use, so the sweep leaves it alone.
+
+    Without this a returning visitor's sandbox would still be collected a
+    year after it was *created*, however recently they last opened it.
+    """
+    repo = request.app.state.repo
+    workspace = repo.workspace(workspace_id)
+    if workspace is not None:
+        repo.put_workspace(dataclasses.replace(workspace, last_seen_at=time.time()))
+
+
+def _live_demo_session(request: Request):
+    """The caller's own demo session, if they still have a usable one.
+
+    Returns None -- so the caller mints a fresh sandbox -- when there is no
+    cookie, when the session has expired or been revoked, when it belongs
+    to a real account rather than a demo, or when the workspace it points
+    at is gone. That last check matters: a session outliving its workspace
+    would land the visitor in an empty shell of a dashboard with every
+    query returning nothing, which reads exactly like data loss.
+    """
+    sid = request.cookies.get(COOKIE)
+    if not sid:
+        return None
+    sess = request.app.state.sessions.resolve(sid)
+    if sess is None or not sess.is_demo:
+        return None
+    if request.app.state.repo.workspace(sess.workspace_id) is None:
+        return None
+    return sess
+
+
 @router.post("/demo")
 def demo(request: Request, response: Response):
     # Every demo visitor gets their OWN sandbox workspace -- a fresh copy
@@ -134,23 +176,42 @@ def demo(request: Request, response: Response):
     # sharing one read-only `config.demo_workspace_id` with every other
     # visitor. Isolation is then automatic: every route already scopes by
     # `sess.workspace_id`, so this is the only place that needs to know a
-    # new id is being minted at all. See this task's own report for why
-    # the old shared-workspace design made the demo unusable.
+    # new id is being minted at all.
+    #
+    # A returning visitor comes BACK to the sandbox they already built.
+    # The demo is meant to behave like an account: whatever you created
+    # last time -- behaviours, runs, an approved patch -- is still there.
+    # Re-seeding on every click would have silently thrown all of it away
+    # and handed back an empty-looking copy, which is indistinguishable
+    # from "my work vanished". The cookie is the only handle on a demo
+    # sandbox (there are no demo credentials), so it is what we resolve.
+    existing = _live_demo_session(request)
+    if existing is not None:
+        _touch_demo_workspace(request, existing.workspace_id)
+        _set_cookie(response, existing.id, max_age=DEMO_TTL_SECONDS)
+        return {
+            "id": "demo",
+            "name": "Demo visitor",
+            "workspace_id": existing.workspace_id,
+            "is_demo": True,
+            "returning": True,
+        }
+
     ws_id = f"ws_demo_{uuid.uuid4().hex[:20]}"
     request.app.state.seed_demo_workspace(ws_id)
-    # Opportunistic, bounded cleanup of OTHER sessions' abandoned sandboxes
+    # Opportunistic, bounded cleanup of sandboxes nobody can reach any more
     # -- after seeding this one, never before: a slow or failed sweep must
-    # never be the reason a visitor's own demo entry fails. See
-    # `app/main.py`'s `_sweep_expired_demo_workspaces_factory` for why this
-    # runs here at all rather than a separate `DELETE` route or a cron job.
+    # never be the reason a visitor's own demo entry fails. Only runs when
+    # a NEW sandbox is minted, so a returning visitor pays nothing for it.
     request.app.state.sweep_expired_demo_workspaces()
     sess = request.app.state.sessions.issue("demo", ws_id, is_demo=True)
-    _set_cookie(response, sess.id)
+    _set_cookie(response, sess.id, max_age=DEMO_TTL_SECONDS)
     return {
         "id": "demo",
         "name": "Demo visitor",
         "workspace_id": ws_id,
         "is_demo": True,
+        "returning": False,
     }
 
 

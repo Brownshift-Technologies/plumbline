@@ -197,8 +197,12 @@ def _sweep_expired_demo_workspaces_factory(repo: Repo):
     runs constantly anyway: every `POST /api/auth/demo`. So this sweep
     runs there instead (see `app/auth_routes.py`'s `demo()`), using
     `Workspace.created_at` (added for exactly this) plus
-    `app.sessions.DEMO_TTL_SECONDS` to find sandboxes whose 2-hour window
-    has passed.
+    `app.sessions.DEMO_TTL_SECONDS` to find sandboxes nobody has opened
+    for a full session lifetime -- i.e. ones no live cookie can still name,
+    so they are unreachable garbage rather than somebody's workspace. It
+    reaps on `Workspace.last_seen_at`, which `POST /api/auth/demo` touches
+    on every entry, NOT on `created_at`: a sandbox is meant to keep working
+    for as long as its owner keeps coming back to it.
 
     **Bounded, so it cannot reintroduce the seeding-latency problem this
     task exists to avoid.** `limit` caps how many expired workspaces one
@@ -219,7 +223,7 @@ def _sweep_expired_demo_workspaces_factory(repo: Repo):
         import time as _time
 
         cutoff = (now if now is not None else _time.time()) - DEMO_TTL_SECONDS
-        expired = [w for w in repo.demo_workspaces() if w.created_at < cutoff]
+        expired = [w for w in repo.demo_workspaces() if w.last_seen_at < cutoff]
         deleted = 0
         for workspace in expired[:limit]:
             repo.delete_workspace_cascade(workspace.id)

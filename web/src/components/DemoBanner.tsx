@@ -8,12 +8,18 @@ import { useCurrentUser } from "../lib/useCurrentUser";
  * renders correctly no matter which screen the demo session lands on
  * first.
  *
- * The wording changed with this task: every demo session now gets its own
- * real, writable sandbox workspace, so "nothing you do here is saved" is
- * no longer true and would read as a bug the moment a visitor approves the
- * gated patch and sees it actually take effect. What is still true, and
- * still worth saying persistently, is that this sandbox is temporary --
- * see `app/sessions.py`'s `DEMO_TTL_SECONDS`.
+ * The wording has been wrong twice. It first said "nothing you do here is
+ * saved", which stopped being true when every demo session got its own
+ * real, writable sandbox. It then said the sandbox disappears in 2 hours,
+ * which stopped being true when a sandbox started behaving like an
+ * account: `POST /api/auth/demo` resolves a returning visitor's cookie
+ * back to the workspace they already built, and the sweep reaps on
+ * `Workspace.last_seen_at`, so one you keep opening is never collected.
+ *
+ * So the banner no longer makes a promise about time at all. It says what
+ * is durably true -- this is yours, it really works, and it is not a real
+ * account -- because a banner that overstates permanence is exactly as
+ * bad as one that understates it.
  */
 export function DemoBanner() {
   const { status, data } = useCurrentUser();
@@ -23,7 +29,7 @@ export function DemoBanner() {
   return (
     <div className="demo-banner" role="status">
       <Icon name="i-spark" size="s" />
-      This is your own live sandbox -- everything you do here really works. It disappears in 2 hours.
+      This is your own live sandbox -- everything you do here really works, and it's still here when you come back.
       <a href="https://plumbline.dev" rel="noreferrer">
         Create an account
       </a>
