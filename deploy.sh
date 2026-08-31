@@ -191,8 +191,7 @@ gcloud run jobs deploy "${JOB_NAME}" \
 # and boots fine, and every `POST /api/runs` silently fails to enqueue.
 gcloud run jobs add-iam-policy-binding "${JOB_NAME}" \
   --project="${PROJECT}" --region="${REGION}" \
-  --member="serviceAccount:${RUNTIME_SA}" --role="roles/run.invoker" \
-  --condition=None >/dev/null
+  --member="serviceAccount:${RUNTIME_SA}" --role="roles/run.invoker" >/dev/null
 
 # --- 9. Pub/Sub push subscription, now that the service URL is known --------
 if gcloud pubsub subscriptions describe "${SUBSCRIPTION}" --project="${PROJECT}" >/dev/null 2>&1; then
