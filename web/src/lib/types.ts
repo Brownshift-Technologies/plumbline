@@ -271,3 +271,11 @@ export interface BillingInvoice {
   status: string;
   url?: string;
 }
+
+/** `GET /api/summary` -- the counts the sidebar shows. Counts only, no rows. */
+export interface SummaryResponse {
+  runs: number;
+  findings: number;
+  behaviours: number;
+  agents: number;
+}

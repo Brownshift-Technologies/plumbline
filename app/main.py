@@ -34,6 +34,7 @@ from app.api_keys import router as api_keys_router
 from app.auth_routes import router as auth_router
 from app.behaviour_routes import router as behaviour_router
 from app.billing_routes import router as billing_router
+from app.summary_routes import router as summary_router
 from app.docs import register_docs
 from app.finding_routes import router as finding_router
 from app.github import GitHubApp
@@ -354,6 +355,7 @@ def build_app(config: PlumblineConfig | None = None, repo: Repo | None = None) -
     app.include_router(member_router)
     app.include_router(ledger_router)
     app.include_router(billing_router)
+    app.include_router(summary_router)
     app.include_router(api_keys_router)
     app.include_router(webhooks_router)
     app.include_router(public_router)

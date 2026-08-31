@@ -22,8 +22,7 @@
   .create { gap: 0; }
 
   .nav a { justify-content: center; position: relative; }
-  .nav .count,
-  .nav .badge { display: none; }
+  .nav .count { display: none; }
 
   /* Tooltip: an accessible name is always present via aria-label; this is a
      purely visual hint shown on hover/focus for sighted pointer users. */

@@ -32,20 +32,20 @@ GitHub repo, which is a Settings pane that does not exist yet.
 
 ## 0:00–0:25 — The friction
 
-> "Every team that ships fast has the same three problems with testing. Someone writes the
-> tests by hand, against a UI that changes every sprint, so the suite rots faster than anyone
-> can fix it. Nobody tests the failure paths, because writing a test for 'what happens when
-> the payment API times out' is tedious and gets skipped. And when something does break,
-> root-causing it and getting a safe fix reviewed takes hours nobody has."
+> "If you ship fast, you already know how this goes. Someone writes the tests by hand,
+> against a UI that changes every sprint, so the suite rots faster than anyone repairs it.
+> Nobody writes tests for the failure paths, because writing a test for 'what if the payment
+> API times out' is boring, so that coverage just doesn't exist. And when something does
+> break, working out why and getting a safe fix reviewed eats a day."
 
 ## 0:25–0:50 — What it is
 
-> "Plumbline is a fleet of eleven agents that does that work instead. One maps your app. One
-> turns plain English into a Playwright test. One repairs selectors when your UI drifts,
-> without touching what the test asserts. One breaks your app on purpose. One runs everything
-> with **no model in the execution loop** — a bug you can't reproduce isn't a bug report,
-> it's a rumour. One root-causes the failure. And one proposes the fix and opens a pull
-> request — then stops."
+> "Plumbline is eleven agents that do that work instead. One maps your app. One turns plain
+> English into a Playwright test. One repairs selectors when your UI drifts, without touching
+> what the test actually asserts. One attacks the app on purpose. One runs everything with no
+> model in the execution loop at all, because a bug you can't reproduce is a rumour, not a bug
+> report. One works out why it failed. And one writes the fix, opens the pull request, and
+> then stops."
 
 **Click** `Agents` in the left nav. Eleven tiles, each with its own tool scope.
 
@@ -60,17 +60,17 @@ Tab B, then tab C, then back. Say what is on screen, nothing more:
    `{"ok":true,"model":"gemini-3.5-flash","gemini_location":"global","service":"plumbline-api"}`
 3. **Cloud Logging**, filtered to `aiplatform.googleapis.com` — real `gemini-3.5-flash` calls.
 
-> "This runs on Cloud Run. The API scales to zero. The worker is a Cloud Run Job, one
-> execution per run. Every model call goes to Vertex AI's gemini-3.5-flash on the global
-> endpoint — the only place that model is served."
+> "This is running on Cloud Run right now. The API scales to zero, the worker is a Cloud Run
+> Job that spins up one execution per run, and every model call goes to Vertex AI's
+> gemini-3.5-flash on the global endpoint, which is the only place that model is served."
 
 ## 1:15–1:35 — The demo door
 
 **Go to tab A.** If you are already signed in, that's fine — otherwise **click**
 `Open the live demo` on the sign-in screen.
 
-> "No account, no Google sign-in. Every visitor gets their own sandbox, and it's still there
-> when they come back."
+> "No account, no Google sign-in. You get your own sandbox, and it's still there when you
+> come back to it."
 
 **Point at** the blue banner: *"This is your own live sandbox — everything you do here really
 works, and it's still here when you come back."*
@@ -90,8 +90,8 @@ A customer who retries a slow payment should only be charged once
 The app navigates to a new run. Agent steps stream in one at a time — Cartographer, Author,
 Runner, Triager.
 
-> "That's plain English. Author turns it into a Playwright spec, Runner executes it, and every
-> step you're watching arrive is being written to an append-only ledger as it happens."
+> "That was a sentence. Author turns it into a Playwright spec, Runner executes it, and every
+> step you're watching land is getting written to an append-only ledger as it happens."
 
 ## 1:55–2:20 — The failure that nobody would have written by hand
 
@@ -104,8 +104,9 @@ That opens **Run 4471**. **Point at** the step list:
 - Runner seeing two charges instead of one
 - Triager: **Reproduced 5 of 5** — a bug, not a flake
 
-> "Nobody wrote this test. Chaos went looking for it — that's the coverage teams skip. And
-> Triager reproduced it five times out of five before it was willing to call it a bug."
+> "Nobody wrote this test. Chaos went looking for it, which is exactly the coverage teams
+> skip. And Triager reproduced it five times out of five before it would call it a bug rather
+> than a flake."
 
 ## 2:20–2:50 — The beat the whole product is built around
 
@@ -116,14 +117,14 @@ Still on Run 4471. **Point at**, in order:
 3. Surgeon's diff and **Pull request #2211**
 4. The last step: *"Surgeon opened the pull request and stopped"*
 
-> "The fleet found the bug, wrote the patch, verified it, opened the pull request — and
-> stopped. It cannot merge this. No agent in the fleet has `pr.merge` in its tool scope. Not
-> a prompt asking it not to. It isn't in the scope, and the Gateway checks the scope on every
-> single call."
+> "So it found the bug, wrote the patch, verified it, opened the pull request, and stopped.
+> It cannot merge this. No agent here has pr.merge in its tool scope. That's not a prompt
+> asking it politely. The permission isn't there, and the Gateway checks on every single
+> call."
 
 **Click** `Approve and merge`.
 
-> "A human makes that call. And the ledger records who did."
+> "A human makes that call, and the ledger records which one."
 
 ## 2:50–3:00 — Close
 
@@ -131,9 +132,9 @@ Still on Run 4471. **Point at**, in order:
 
 Show `intact: true`.
 
-> "Every decision the Gateway made — allowed, blocked, gated — hash-chained, in order, and
-> tamper-evident. Eleven agents, one gate they all pass through, and a human signing off
-> before anything real changes. That's Plumbline."
+> "Every decision the Gateway made, allowed or blocked or gated, hash-chained and in order,
+> so you can tell if anyone edited it. Eleven agents, one gate they all go through, and a
+> person signing off before anything real changes. That's Plumbline."
 
 Leave the URL on screen. End.
 
