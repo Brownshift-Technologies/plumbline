@@ -142,3 +142,128 @@ def test_finding_ages_match_the_design_exactly(repo, config):
     assert 2.9 < age_days("Cart total drifts a cent when currency changes") < 3.1
     assert 3.9 < age_days("Order history paginates past the last page") < 4.1
     assert 8.9 < age_days("Admin pricing table sorts unstably") < 9.1
+
+
+# --- Task 17e: the seeded ledger is no longer empty -----------------------
+
+
+def test_the_seeded_ledger_has_entries(repo, config):
+    from gateway.ledger import Ledger
+    from seed.demo import seed_demo
+
+    ws = seed_demo(repo, config)
+    entries = Ledger(repo).entries(ws.id)
+    # "30-60, enough that checked: N is convincing, not so much the page
+    # is noise" -- the brief's own range.
+    assert 30 <= len(entries) <= 60
+
+
+def test_the_seeded_chain_verifies_intact(repo, config):
+    from gateway.ledger import Ledger
+    from seed.demo import seed_demo
+
+    ws = seed_demo(repo, config)
+    ledger = Ledger(repo)
+    assert ledger.verify(ws.id) is True
+    assert len(ledger.entries(ws.id)) > 0
+
+
+def test_seeding_twice_does_not_fork_or_double_the_chain(repo, config):
+    from gateway.ledger import Ledger
+    from seed.demo import seed_demo
+
+    ws = seed_demo(repo, config)
+    ledger = Ledger(repo)
+    first = ledger.entries(ws.id)
+
+    seed_demo(repo, config)
+
+    second = ledger.entries(ws.id)
+    assert len(second) == len(first)
+    assert [e["id"] for e in second] == [e["id"] for e in first]
+    assert ledger.verify(ws.id) is True
+
+
+def test_the_gate_refusal_is_in_the_ledger(repo, config):
+    """The entry that matters most: Surgeon's `pr.merge` on the payments
+    file, held for a human -- the ledger proving the gate actually held,
+    not just the UI asserting it."""
+    from gateway.ledger import Ledger
+    from seed.demo import seed_demo
+
+    ws = seed_demo(repo, config)
+    entries = Ledger(repo).entries(ws.id)
+    gate = next(
+        e for e in entries
+        if e["actor"] == "surgeon" and e["action"] == "pr.merge"
+        and e["detail"].get("target") == "src/checkout/payment-client.ts"
+    )
+    assert gate["detail"]["decision"] == "gated"
+    assert "human" in gate["detail"]["reason"]
+
+
+def test_a_blocked_call_is_in_the_ledger_not_only_allows(repo, config):
+    """A ledger of nothing but allows is not evidence of governance."""
+    from gateway.ledger import Ledger
+    from seed.demo import seed_demo
+
+    ws = seed_demo(repo, config)
+    entries = Ledger(repo).entries(ws.id)
+    denied = next(
+        e for e in entries
+        if e["actor"] == "chaos" and e["action"] == "env.write"
+        and e["detail"].get("target") == "production"
+    )
+    assert denied["detail"]["decision"] == "blocked"
+
+    decisions = {e["detail"].get("decision") for e in entries if "decision" in e["detail"]}
+    assert "allowed" in decisions
+    assert "blocked" in decisions
+    assert "gated" in decisions
+
+
+def test_a_redacted_entry_shows_redaction_happened(repo, config):
+    """One seeded entry's detail would have carried a live card number --
+    Ledger.append redacts before signing, so neither the raw card number
+    nor the chain's own integrity survives the seed intact by accident."""
+    from gateway.ledger import Ledger
+    from seed.demo import seed_demo
+
+    ws = seed_demo(repo, config)
+    ledger = Ledger(repo)
+    entries = ledger.entries(ws.id)
+    redacted = next(e for e in entries if "excerpt" in e["detail"])
+
+    assert "4111111111111111" not in redacted["detail"]["excerpt"]
+    assert "[CARD]" in redacted["detail"]["excerpt"]
+    assert ledger.verify(ws.id) is True
+
+
+def test_entry_timestamps_match_the_runs_they_belong_to(repo, config):
+    """Ledger entries dated 1970, or all identical, would undercut the
+    same credibility the finding-age fix round above already protects."""
+    import time
+
+    from gateway.ledger import Ledger
+    from seed.demo import seed_demo
+
+    ws = seed_demo(repo, config)
+    now = time.time()
+    entries = Ledger(repo).entries(ws.id)
+
+    ats = {e["at"] for e in entries}
+    assert len(ats) > 1  # not all-identical
+    assert all(now - 11 * 86400 < a <= now for a in ats)  # nothing at epoch 0
+
+    gate = next(
+        e for e in entries
+        if e["actor"] == "surgeon" and e["action"] == "pr.merge"
+    )
+    # Run 4471 started ~22 minutes ago; the gate is near the end of it.
+    age_minutes = (now - gate["at"]) / 60
+    assert 0 <= age_minutes < 22
+
+    # seq order must match chronological (`at`) order -- the chain follows
+    # insertion order, so those two orderings have to agree.
+    assert [e["seq"] for e in entries] == sorted(e["seq"] for e in entries)
+    assert [e["at"] for e in entries] == sorted(e["at"] for e in entries)

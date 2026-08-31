@@ -36,8 +36,11 @@ figure).
 
 import time
 import uuid
+from unittest.mock import patch as _time_patch
 
 from app.models import Behaviour, Finding, Patch, Route, Run, Step, Workspace
+from gateway.ledger import Ledger
+from gateway.policy import decide
 
 # path -> coverage_pct, in the exact order design/preview.html's own
 # `routelist` script builds them.
@@ -243,6 +246,227 @@ def _seed_runs(repo, ws_id: str) -> None:
         ))
 
 
+# The workspace's own `policy_version` above -- every seeded ledger entry
+# below records this same value, exactly the way `gateway.gateway.Gateway.
+# _record` records whichever version was actually in force for a real call
+# (see that module's docstring). Repeated as a constant rather than read
+# back off the `Workspace` object seeded above so `_seed_ledger` (which
+# never receives that object) cannot silently drift from it.
+_LEDGER_POLICY_VERSION = 14
+
+# A Luhn-valid test PAN (the well-known "4111 1111 1111 1111" test card),
+# planted inside one entry's `detail` on purpose -- see `_seed_ledger`'s
+# own docstring for why.
+_DEMO_TEST_CARD = "4111111111111111"
+
+
+def _gateway_event(agent: str, tool: str, target: str, extra: dict | None = None) -> tuple[str, str, dict]:
+    """One (actor, action, detail) ledger row shaped exactly the way
+    `gateway.gateway.Gateway._record` shapes a real one, computed by
+    running the SAME `gateway.policy.decide` a live call would run rather
+    than hand-writing "allowed"/"blocked"/"gated" and a plausible-looking
+    reason string. `rules=None` -- this seed's workspace ships with
+    `gate_rules=()`, which `Gateway._rules_for` treats identically to a
+    missing workspace: fall back to `gateway.policy.DEFAULT_RULES` -- so
+    every seeded decision is the one `DEFAULT_RULES` actually produces for
+    that agent/tool/target, not an invented one that could quietly drift
+    from what `decide()` really does.
+    """
+    decision = decide(agent, tool, target, rules=None)
+    if decision.allowed:
+        outcome = "allowed"
+    else:
+        outcome = "gated" if decision.needs_human else "blocked"
+    detail = {
+        "decision": outcome, "reason": decision.reason, "target": target,
+        "policy_version": _LEDGER_POLICY_VERSION,
+    }
+    if extra:
+        detail.update(extra)
+    return agent, tool, detail
+
+
+def _seed_ledger(repo, ws_id: str) -> None:
+    """Task 17e: the seeded demo audit ledger.
+
+    Every prior piece of this fixture -- routes, behaviours, runs,
+    findings, the gated patch -- describes what the seeded fleet did.
+    None of it was ever actually written through `Ledger.append`, so
+    `GET /api/ledger` on a fresh demo workspace comes back empty and
+    `GET /api/ledger/verify` reports `{"intact": true, "checked": 0}` --
+    truthful, and worthless as a demonstration: a judge who clicks the one
+    control that makes "append-only and tamper-evident" checkable rather
+    than asserted sees zero entries checked. This function is what makes
+    that control mean something, by appending the entries the rest of
+    this fixture's own story implies: run 4471's fleet reasoning about a
+    double charge and Surgeon's merge attempt getting stopped by the human
+    gate that decides it, a couple of calls the gateway actually refused
+    (never only allows -- a ledger of nothing but "allowed" is not
+    evidence of governance), one entry whose `detail` would have carried a
+    card number, and two human actions alongside the agents' own.
+
+    **Idempotent by an explicit guard, not by construction.** Every other
+    seed function in this module writes fixed, deterministic document ids
+    (see the module docstring), which is what makes `Repo.put_*`'s
+    create-or-replace semantics naturally idempotent. `Ledger.append` has
+    no such shape on purpose -- it is the audit-of-record, so every call
+    mints a fresh `uuid4()` entry id and advances `seq` from whatever head
+    it reads (`gateway/ledger.py`'s own module docstring). Calling it
+    again would not overwrite the entries seeded before; it would fork a
+    longer, still individually-valid chain on top of them -- exactly the
+    silent-fork failure that module's docstring warns `append` itself is
+    vulnerable to under concurrency, self-inflicted here instead by a
+    naive "reseed everything" call. So this function checks first: if the
+    workspace's chain already has entries, it is left alone. Unlike the
+    rest of `seed_demo` (Task 15's own `test_reseeding_restores_the_
+    pristine_fixture`: every OTHER document resets to this exact fixture
+    on every fresh demo entry, undoing whatever a prior visitor mutated),
+    the ledger does not reset -- an audit trail that a later visitor's
+    session could rewind would not be much of one. It only ever grows.
+
+    **Timestamps, and why `time.time()` is patched.** `Ledger.append`
+    takes no `at` argument -- it stamps the moment it is actually called,
+    on purpose (see its own docstring: the audit-of-record should not
+    trust a caller's own claim about when something happened). That is
+    exactly right for a live gateway call and exactly wrong for backdating
+    a demo fixture to match runs that "happened" 22/67/112 minutes ago:
+    calling `append` for all of these right now would sign every entry
+    with the current instant, and a ledger dated all-identical (or,
+    worse, 1970) would undercut the same credibility Task 15's finding-age
+    fix round already spent effort protecting (see `_FINDINGS`'s own
+    comment above). Neither `gateway/ledger.py` nor `Ledger.append`'s
+    signature may change here (out of scope for this task), so this seed
+    reaches for the same lever `tests/test_ledger.py`'s own retry test
+    uses against the identical line of code: `time.time` is patched, one
+    entry at a time, to the timestamp that entry should carry, for just
+    the duration of that one `append` call. The signed payload embeds
+    whichever value `time.time()` returned at signing time either way;
+    this only changes what that value honestly was.
+
+    **Ordering.** `seq` and the hash chain follow insertion order, not the
+    `at` field (`Ledger.entries` re-sorts by `seq`, `Ledger.verify` walks
+    that same order) -- so entries are appended oldest-timestamp-first,
+    matching the order they would really have landed in. Governance setup
+    (an owner tightening the merge gate, an approver accepting an older,
+    low-severity finding) comes first, days before any seeded run; then
+    run 4469, then 4470, then 4471, ending on the entry that matters most:
+    Surgeon's `pr.merge` on `src/checkout/payment-client.ts`, gated by the
+    very rule seeded first.
+    """
+    ledger = Ledger(repo)
+    if ledger.entries(ws_id):
+        return
+
+    now = time.time()
+    events: list[tuple[float, str, str, dict]] = []
+
+    # --- governance: a human tightens the gate, a human accepts a find --
+    at, actor, action, detail = (
+        now - 10 * 86400, "Roger K.", "policy.gate_rules_updated",
+        {
+            "target": "pr.merge", "policy_version": _LEDGER_POLICY_VERSION,
+            "change": "require human approval before merging src/checkout/payment* and src/billing/*",
+        },
+    )
+    events.append((at, actor, action, detail))
+    at, actor, action, detail = (
+        now - 8.9 * 86400, "Ama O.", "finding.accept",
+        {
+            "target": "finding_pricing_sort", "decision": "accepted",
+            "reason": "sort instability is cosmetic; not worth blocking release",
+        },
+    )
+    events.append((at, actor, action, detail))
+    at, actor, action, detail = (
+        now - 60 * 60, "Roger K.", "pr.review",
+        {
+            "target": "src/checkout/nav.ts", "decision": "approved",
+            "reason": "nav refactor looks safe, no payments path touched",
+        },
+    )
+    events.append((at, actor, action, detail))
+
+    # --- run 4469: scheduled nightly chaos sweep, 2 failed --------------
+    # `minutes_ago` mirrors `_seed_runs`'s own `(4471 - number) * 45 + 22`
+    # so this run's ledger entries land inside the same real window its
+    # own `Run.started_at` claims, rather than merely near it.
+    start_4469 = now - ((4471 - 4469) * 45 + 22) * 60
+    for offset, (agent, tool, target) in zip(
+        (0, 80, 160, 240, 320, 400, 480, 560),
+        [
+            ("cartographer", "browser.read", "/account/security"),
+            ("author", "repo.write:specs", "specs/account-security.spec.ts"),
+            ("chaos", "net.fault", "auth-api"),
+            ("chaos", "env.write", "staging"),
+            # The blocked call this task asks for by name: Chaos reaching
+            # for a production-shaped target, denied by DEFAULT_RULES'
+            # `env.write` allow_only rule.
+            ("chaos", "env.write", "production"),
+            ("runner", "browser.drive", "/account/security"),
+            ("runner", "artefact.write", "artefacts/run-4469-har.json"),
+            ("triager", "trace.read", "traces/run-4469-session-trace.json"),
+        ],
+    ):
+        events.append((start_4469 + offset, *_gateway_event(agent, tool, target)))
+
+    # --- run 4470: pull request -- checkout nav refactor ----------------
+    start_4470 = now - ((4471 - 4470) * 45 + 22) * 60
+    for offset, (agent, tool, target) in zip(
+        (0, 50, 100, 150, 200, 250, 300, 340),
+        [
+            ("cartographer", "browser.read", "/checkout/review"),
+            ("healer", "repo.write:specs", "specs/checkout-nav-submit.spec.ts"),
+            ("healer", "repo.write:specs", "specs/checkout-review-nav.spec.ts"),
+            ("runner", "browser.drive", "/checkout"),
+            ("runner", "artefact.write", "artefacts/run-4470-har.json"),
+            ("surgeon", "repo.write:src", "src/checkout/nav.ts"),
+            ("surgeon", "pr.open", "src/checkout/nav.ts"),
+            ("surgeon", "checks.write", "src/checkout/nav.ts"),
+        ],
+    ):
+        events.append((start_4470 + offset, *_gateway_event(agent, tool, target)))
+
+    # --- run 4471: the run behind the gated double-charge patch ---------
+    # Same fleet order `_RUN_4471_STEPS` already tells: Cartographer maps,
+    # Author writes, Healer repairs, Chaos faults, Runner drives, Triager
+    # reproduces, Surgeon opens a pull request and is stopped at the merge.
+    start_4471 = now - 22 * 60
+    for offset, (agent, tool, target, extra) in zip(
+        range(0, 360, 30),
+        [
+            ("cartographer", "browser.read", "/checkout/payment", None),
+            ("author", "repo.write:specs", "specs/checkout-payment.spec.ts", None),
+            ("healer", "repo.write:specs", "specs/checkout-payment-nav.spec.ts", None),
+            ("chaos", "net.fault", "payments-api", None),
+            ("chaos", "env.write", "staging", None),
+            ("runner", "browser.drive", "/checkout/payment", None),
+            ("runner", "artefact.write", "artefacts/run-4471-har.json", None),
+            # The redaction demonstration this task asks for: a raw trace
+            # excerpt that would have carried a live PAN, appended as-is --
+            # `Ledger.append` runs `core.store._redact` (== `core.guards.
+            # redact_deep`) over `detail` before anything is signed, so
+            # what actually lands in the ledger (and what gets signed) is
+            # the redacted `[CARD]` form, never the card number itself.
+            ("triager", "trace.read", "traces/run-4471-charge-trace.json",
+             {"excerpt": f"retry #2 charged card {_DEMO_TEST_CARD} a second time"}),
+            ("surgeon", "repo.write:src", "src/checkout/payment-client.ts", None),
+            ("surgeon", "pr.open", "src/checkout/payment-client.ts", None),
+            # The entry that matters most: the gate itself, holding.
+            ("surgeon", "pr.merge", "src/checkout/payment-client.ts", None),
+            # Surgeon still reports the run's outcome as a check run even
+            # though the merge itself is on hold -- `checks.write` has no
+            # gate rule of its own in `DEFAULT_RULES`.
+            ("surgeon", "checks.write", "src/checkout/payment-client.ts", None),
+        ],
+    ):
+        events.append((start_4471 + offset, *_gateway_event(agent, tool, target, extra)))
+
+    events.sort(key=lambda e: e[0])
+    for at, actor, action, detail in events:
+        with _time_patch("time.time", return_value=at):
+            ledger.append(ws_id, actor, action, detail)
+
+
 def seed_demo(repo, config) -> Workspace:
     """Write (or idempotently rewrite) the whole demo fixture and return
     the `Workspace` it lives in. Safe to call on every `POST /api/auth/demo`
@@ -261,5 +485,6 @@ def seed_demo(repo, config) -> Workspace:
     _seed_behaviours(repo, ws_id)
     _seed_findings_and_patch(repo, ws_id)
     _seed_runs(repo, ws_id)
+    _seed_ledger(repo, ws_id)
 
     return workspace
