@@ -2,6 +2,9 @@
 
 ![Plumbline architecture: browser to Cloud Run API, Firestore and Pub/Sub, a Cloud Run Job worker, the Gateway, eleven agents, and Vertex AI / Playwright](./plumbline-architecture.svg)
 
+The editable source is `plumbline-architecture.drawio`, which opens in
+[diagrams.net](https://app.diagrams.net) directly.
+
 The one sentence version: **every tool call from every agent passes through a single
 function.** Not most calls, not the risky ones, every one, from Cartographer reading a page
 to Surgeon opening a pull request. That function is the Gateway (`gateway/gateway.py`), and

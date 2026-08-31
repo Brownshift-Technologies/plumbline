@@ -1,0 +1,184 @@
+<mxfile host="app.diagrams.net">
+  <diagram name="Plumbline architecture" id="plumbline">
+    <mxGraphModel dx="1400" dy="900" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1500" pageHeight="1060" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <mxCell id="s1" value="1 · Two ways in" style="rounded=1;arcSize=3;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#D6DBE0;dashed=1;fontColor=#1A1A18;fontSize=14;fontStyle=1;verticalAlign=top;align=left;spacingLeft=16;spacingTop=8;" vertex="1" parent="1">
+          <mxGeometry x="40" y="60" width="290" height="270" as="geometry"/>
+        </mxCell>
+        <mxCell id="n_browser" value="&lt;b&gt;Dashboard&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#5F5F59&quot;&gt;React, session cookie&lt;/font&gt;" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#C9CFD6;fontColor=#1A1A18;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="64" y="100" width="242" height="52" as="geometry"/>
+        </mxCell>
+        <mxCell id="n_agent" value="&lt;b&gt;Your coding agent&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#5F5F59&quot;&gt;MCP client, API key&lt;/font&gt;" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#C9CFD6;fontColor=#1A1A18;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="64" y="164" width="242" height="52" as="geometry"/>
+        </mxCell>
+        <mxCell id="n_ci" value="&lt;b&gt;Your pipeline&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#5F5F59&quot;&gt;/v1 REST, HMAC webhooks&lt;/font&gt;" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#C9CFD6;fontColor=#1A1A18;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="64" y="228" width="242" height="52" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="s2" value="2 · The API answers in milliseconds" style="rounded=1;arcSize=3;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#D6DBE0;dashed=1;fontColor=#1A1A18;fontSize=14;fontStyle=1;verticalAlign=top;align=left;spacingLeft=16;spacingTop=8;" vertex="1" parent="1">
+          <mxGeometry x="380" y="60" width="330" height="270" as="geometry"/>
+        </mxCell>
+        <mxCell id="n_api" value="&lt;b&gt;Cloud Run · plumbline-api&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#5F5F59&quot;&gt;FastAPI. Auth, REST, SSE run stream,&lt;br&gt;MCP server. Scales to zero.&lt;/font&gt;" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#EEF2FE;strokeColor=#1F4FD8;fontColor=#1A1A18;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="404" y="104" width="282" height="76" as="geometry"/>
+        </mxCell>
+        <mxCell id="n_fs" value="&lt;b&gt;Firestore&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#5F5F59&quot;&gt;State, and the append-only ledger&lt;/font&gt;" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#EEF2FE;strokeColor=#1F4FD8;fontColor=#1A1A18;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="404" y="196" width="282" height="52" as="geometry"/>
+        </mxCell>
+        <mxCell id="n_ps" value="&lt;b&gt;Pub/Sub&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#5F5F59&quot;&gt;run.requested · run.step · run.finished&lt;/font&gt;" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#EEF2FE;strokeColor=#1F4FD8;fontColor=#1A1A18;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="404" y="260" width="282" height="52" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="s3" value="3 · A run is handed to a worker" style="rounded=1;arcSize=3;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#D6DBE0;dashed=1;fontColor=#1A1A18;fontSize=14;fontStyle=1;verticalAlign=top;align=left;spacingLeft=16;spacingTop=8;" vertex="1" parent="1">
+          <mxGeometry x="760" y="60" width="330" height="270" as="geometry"/>
+        </mxCell>
+        <mxCell id="n_job" value="&lt;b&gt;Cloud Run Job · plumbline-worker&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#5F5F59&quot;&gt;One execution per run. Full CPU,&lt;br&gt;no request timeout, 2 vCPU / 4 GiB.&lt;/font&gt;" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#EEF2FE;strokeColor=#1F4FD8;fontColor=#1A1A18;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="784" y="104" width="282" height="76" as="geometry"/>
+        </mxCell>
+        <mxCell id="n_note" value="The API and the worker share nothing but&lt;br&gt;Firestore and Pub/Sub. The worker never&lt;br&gt;calls the API." style="text;html=1;whiteSpace=wrap;fontColor=#5F5F59;fontSize=12;align=left;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="784" y="196" width="282" height="60" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="s4" value="4 · Every tool call goes through one gate" style="rounded=1;arcSize=3;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#D6DBE0;dashed=1;fontColor=#1A1A18;fontSize=14;fontStyle=1;verticalAlign=top;align=left;spacingLeft=16;spacingTop=8;" vertex="1" parent="1">
+          <mxGeometry x="40" y="380" width="1050" height="360" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="n_gw" value="&lt;b&gt;The Gateway&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#FFFFFF&quot;&gt;One function. No second path.&lt;/font&gt;" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#1F4FD8;strokeColor=#1F4FD8;fontColor=#FFFFFF;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="64" y="424" width="250" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="n_gw1" value="1 · Resolve caller and policy version" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#C9CFD6;fontColor=#1A1A18;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="64" y="496" width="250" height="34" as="geometry"/>
+        </mxCell>
+        <mxCell id="n_gw2" value="2 · Check tool against that agent's scope" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#C9CFD6;fontColor=#1A1A18;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="64" y="536" width="250" height="34" as="geometry"/>
+        </mxCell>
+        <mxCell id="n_gw3" value="3 · Scan model-bound text for injection" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#C9CFD6;fontColor=#1A1A18;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="64" y="576" width="250" height="34" as="geometry"/>
+        </mxCell>
+        <mxCell id="n_gw4" value="4 · Redact PII and secrets" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#C9CFD6;fontColor=#1A1A18;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="64" y="616" width="250" height="34" as="geometry"/>
+        </mxCell>
+        <mxCell id="n_gw5" value="5 · Gate rules: does a human have to sign?" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#FFF8E8;strokeColor=#C9932B;fontColor=#1A1A18;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="64" y="656" width="250" height="34" as="geometry"/>
+        </mxCell>
+        <mxCell id="n_gw6" value="6 · Execute, append to ledger, emit span" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#C9CFD6;fontColor=#1A1A18;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="64" y="696" width="250" height="34" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="n_agents" value="&lt;b&gt;Eleven agents&lt;/b&gt;&lt;font color=&quot;#5F5F59&quot;&gt;, each with a scoped set of tools and nothing more&lt;/font&gt;" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#FBFAF8;strokeColor=#C9CFD6;fontColor=#1A1A18;fontSize=13;verticalAlign=top;align=left;spacingLeft=14;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="360" y="424" width="706" height="306" as="geometry"/>
+        </mxCell>
+        <mxCell id="a1" value="&lt;b&gt;Cartographer&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#1F4FD8&quot;&gt;browser.read · graph.write&lt;/font&gt;" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#DEE3E9;fontColor=#1A1A18;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="382" y="464" width="220" height="46" as="geometry"/>
+        </mxCell>
+        <mxCell id="a2" value="&lt;b&gt;Author&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#1F4FD8&quot;&gt;graph.read · repo.write:specs&lt;/font&gt;" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#DEE3E9;fontColor=#1A1A18;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="614" y="464" width="220" height="46" as="geometry"/>
+        </mxCell>
+        <mxCell id="a3" value="&lt;b&gt;Healer&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#1F4FD8&quot;&gt;repo.write:specs · trace.read&lt;/font&gt;" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#DEE3E9;fontColor=#1A1A18;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="846" y="464" width="198" height="46" as="geometry"/>
+        </mxCell>
+        <mxCell id="a4" value="&lt;b&gt;Chaos&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#1F4FD8&quot;&gt;net.fault · env.write · mcp.seed&lt;/font&gt;" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#DEE3E9;fontColor=#1A1A18;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="382" y="520" width="220" height="46" as="geometry"/>
+        </mxCell>
+        <mxCell id="a5" value="&lt;b&gt;Runner&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#1F9D6B&quot;&gt;browser.drive · no model, on purpose&lt;/font&gt;" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9BD9BE;fontColor=#1A1A18;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="614" y="520" width="220" height="46" as="geometry"/>
+        </mxCell>
+        <mxCell id="a6" value="&lt;b&gt;Triager&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#1F4FD8&quot;&gt;trace.read · repo.write:findings&lt;/font&gt;" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#DEE3E9;fontColor=#1A1A18;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="846" y="520" width="198" height="46" as="geometry"/>
+        </mxCell>
+        <mxCell id="a7" value="&lt;b&gt;Surgeon&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#1F4FD8&quot;&gt;repo.write:src · pr.open · pr.merge&lt;/font&gt;" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#FFF8E8;strokeColor=#C9932B;fontColor=#1A1A18;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="382" y="576" width="220" height="46" as="geometry"/>
+        </mxCell>
+        <mxCell id="a8" value="&lt;b&gt;Sentinel&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#1F4FD8&quot;&gt;telemetry.read · graph.read&lt;/font&gt;" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#DEE3E9;fontColor=#1A1A18;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="614" y="576" width="220" height="46" as="geometry"/>
+        </mxCell>
+        <mxCell id="a9" value="&lt;b&gt;Auditor&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#1F4FD8&quot;&gt;browser.read · graph.read&lt;/font&gt;" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#DEE3E9;fontColor=#1A1A18;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="846" y="576" width="198" height="46" as="geometry"/>
+        </mxCell>
+        <mxCell id="a10" value="&lt;b&gt;Oracle&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#1F4FD8&quot;&gt;browser.read · graph.read&lt;/font&gt;" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#DEE3E9;fontColor=#1A1A18;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="382" y="632" width="220" height="46" as="geometry"/>
+        </mxCell>
+        <mxCell id="a11" value="&lt;b&gt;Economist&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#1F9D6B&quot;&gt;graph.read · no write scope at all&lt;/font&gt;" style="rounded=1;arcSize=14;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#9BD9BE;fontColor=#1A1A18;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="614" y="632" width="220" height="46" as="geometry"/>
+        </mxCell>
+        <mxCell id="a_note" value="Scopes are static in code.&lt;br&gt;Gate rules are per-workspace&lt;br&gt;and versioned." style="text;html=1;whiteSpace=wrap;fontColor=#5F5F59;fontSize=11;align=left;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="846" y="632" width="198" height="60" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="s5" value="5 · What an agent may reach, and only through the gate" style="rounded=1;arcSize=3;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#D6DBE0;dashed=1;fontColor=#1A1A18;fontSize=14;fontStyle=1;verticalAlign=top;align=left;spacingLeft=16;spacingTop=8;" vertex="1" parent="1">
+          <mxGeometry x="1140" y="380" width="320" height="360" as="geometry"/>
+        </mxCell>
+        <mxCell id="n_vertex" value="&lt;b&gt;Vertex AI&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#5F5F59&quot;&gt;gemini-3.5-flash, on the&lt;br&gt;global endpoint&lt;/font&gt;" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#EEF2FE;strokeColor=#1F4FD8;fontColor=#1A1A18;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="1164" y="424" width="272" height="64" as="geometry"/>
+        </mxCell>
+        <mxCell id="n_chrome" value="&lt;b&gt;Chromium&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#5F5F59&quot;&gt;Playwright, inside the worker&lt;/font&gt;" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#C9CFD6;fontColor=#1A1A18;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="1164" y="504" width="272" height="52" as="geometry"/>
+        </mxCell>
+        <mxCell id="n_repo" value="&lt;b&gt;Your repository&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#5F5F59&quot;&gt;GitHub App, shallow clone&lt;/font&gt;" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#C9CFD6;fontColor=#1A1A18;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="1164" y="572" width="272" height="52" as="geometry"/>
+        </mxCell>
+        <mxCell id="n_mcp" value="&lt;b&gt;Your MCP servers&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#5F5F59&quot;&gt;Manifest screened for injection&lt;br&gt;before it reaches a prompt&lt;/font&gt;" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#C9CFD6;fontColor=#1A1A18;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="1164" y="640" width="272" height="64" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="s6" value="6 · It stops at a human" style="rounded=1;arcSize=3;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#D6DBE0;dashed=1;fontColor=#1A1A18;fontSize=14;fontStyle=1;verticalAlign=top;align=left;spacingLeft=16;spacingTop=8;" vertex="1" parent="1">
+          <mxGeometry x="40" y="790" width="1420" height="210" as="geometry"/>
+        </mxCell>
+        <mxCell id="n_gate" value="&lt;b&gt;Approval gate&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#5F5F59&quot;&gt;payments/* needs an owner with two-factor.&lt;br&gt;A blocked call is a first-class outcome, not an error.&lt;/font&gt;" style="rounded=1;arcSize=10;whiteSpace=wrap;html=1;fillColor=#FFF8E8;strokeColor=#C9932B;fontColor=#1A1A18;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="360" y="838" width="330" height="76" as="geometry"/>
+        </mxCell>
+        <mxCell id="n_human" value="&lt;b&gt;A person&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#5F5F59&quot;&gt;Approves, rejects, or&lt;br&gt;requests changes&lt;/font&gt;" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#C9CFD6;fontColor=#1A1A18;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="750" y="838" width="230" height="76" as="geometry"/>
+        </mxCell>
+        <mxCell id="n_pr" value="&lt;b&gt;Pull request&lt;/b&gt;&lt;br&gt;&lt;font color=&quot;#5F5F59&quot;&gt;A fresh branch, never your&lt;br&gt;default branch&lt;/font&gt;" style="rounded=1;arcSize=12;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#C9CFD6;fontColor=#1A1A18;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="1040" y="838" width="230" height="76" as="geometry"/>
+        </mxCell>
+        <mxCell id="n_gatenote" value="&lt;b&gt;Surgeon holds pr.merge and still cannot use it.&lt;/b&gt;&lt;br&gt;The scope says the tool exists. The gate rule says&lt;br&gt;who has to agree before it happens." style="text;html=1;whiteSpace=wrap;fontColor=#5F5F59;fontSize=12;align=left;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="64" y="846" width="270" height="70" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#1F4FD8;strokeWidth=2;endArrow=block;endFill=1;" edge="1" parent="1" source="n_browser" target="n_api">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#1F4FD8;strokeWidth=2;endArrow=block;endFill=1;" edge="1" parent="1" source="n_agent" target="n_api">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#1F4FD8;strokeWidth=2;endArrow=block;endFill=1;" edge="1" parent="1" source="n_ci" target="n_api">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e4" value="enqueue" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#1F4FD8;strokeWidth=2;endArrow=block;endFill=1;fontSize=11;fontColor=#5F5F59;" edge="1" parent="1" source="n_api" target="n_job">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#C9CFD6;strokeWidth=1;endArrow=block;endFill=1;dashed=1;" edge="1" parent="1" source="n_api" target="n_fs">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#C9CFD6;strokeWidth=1;endArrow=block;endFill=1;dashed=1;" edge="1" parent="1" source="n_api" target="n_ps">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e7" value="starts the fleet" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#1F4FD8;strokeWidth=2;endArrow=block;endFill=1;fontSize=11;fontColor=#5F5F59;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="n_job" target="n_agents">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e8" value="every call" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#1F4FD8;strokeWidth=2;endArrow=block;endFill=1;fontSize=11;fontColor=#5F5F59;exitX=0;exitY=0.5;entryX=1;entryY=0;" edge="1" parent="1" source="n_agents" target="n_gw">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e9" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#1F4FD8;strokeWidth=2;endArrow=block;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="n_gw6" target="n_vertex">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e10" value="ledger append" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#C9CFD6;strokeWidth=1;endArrow=block;endFill=1;dashed=1;fontSize=11;fontColor=#5F5F59;exitX=0.5;exitY=0;entryX=0;entryY=0.5;" edge="1" parent="1" source="n_gw" target="n_fs">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e11" value="gated" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#C9932B;strokeWidth=2;endArrow=block;endFill=1;fontSize=11;fontColor=#5F5F59;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="n_gw5" target="n_gate">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e12" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#C9932B;strokeWidth=2;endArrow=block;endFill=1;" edge="1" parent="1" source="n_gate" target="n_human">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e13" value="signs it" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#C9932B;strokeWidth=2;endArrow=block;endFill=1;fontSize=11;fontColor=#5F5F59;" edge="1" parent="1" source="n_human" target="n_pr">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
