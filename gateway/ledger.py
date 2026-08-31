@@ -154,6 +154,98 @@ class Ledger:
 
         return _append(self._repo.store.transaction())
 
+    def append_many(self, workspace_id: str, entries: list[dict]) -> str:
+        """Bulk-append a fully deterministic chain in ONE Firestore transaction.
+
+        `append` exists for concurrent, independent callers -- real agents,
+        mid-run, each reaching the Gateway at their own pace -- where the
+        transaction is doing genuine work: resolving a race none of the
+        callers could see coming. Seeding is the opposite shape: one
+        writer, entries fully known up front, chained to each other in a
+        loop it already controls. Running that through `append` N times is
+        N separate network round trips, each its own transaction,
+        *serialised* by contention on the same `ledger_head` document --
+        fine against `FakeFirestore` (no network, no latency), fatal
+        against real Firestore once N is more than a handful: this is
+        exactly the `DeadlineExceeded` that put `POST /api/auth/demo` at a
+        500 in production (31 sequential `append` calls seeding the demo
+        ledger). `append_many` computes the whole chain -- every `prev`,
+        `seq`, and signature -- in memory first, using `_sign` (never a
+        second signing implementation; see the module docstring on why
+        that drift is exactly the failure this codebase avoids elsewhere),
+        then writes every entry plus the final head in the SAME transaction
+        that reads the head once. One round trip, any N.
+
+        `entries` is a list of dicts, each with `actor`, `action`, `detail`,
+        and an optional `at` (unix timestamp; defaults to `time.time()`,
+        read once per entry when this method is called -- not inside the
+        transactional closure, because there is no per-attempt clock skew
+        to guard against here the way `append` must: the whole chain is
+        computed exactly once, up front; a conflicting commit means this
+        call raced a REAL concurrent writer, and the decorator retries the
+        transaction, not the chain computation). This is what lets
+        `seed/demo.py` hand every entry its own backdated timestamp without
+        the one-entry-at-a-time `time.time` patching `append` alone would
+        force.
+
+        An empty `entries` is a true no-op: no transaction, no write, the
+        current head's signature (or GENESIS on a workspace with no
+        entries yet) returned unchanged.
+
+        Returns the final entry's signature -- the new head -- exactly as
+        the last `append` in an equivalent loop would.
+        """
+        from google.cloud import firestore
+
+        if not entries:
+            head = self._repo.store.get("ledger_head", workspace_id)
+            return head["signature"] if head else self.GENESIS
+
+        now = time.time()
+        prepared = [
+            {
+                "actor": _redact(e["actor"]),
+                "action": _redact(e["action"]),
+                "detail": _redact(e["detail"]),
+                "at": e["at"] if "at" in e else now,
+            }
+            for e in entries
+        ]
+
+        head_ref = self._repo.store.doc("ledger_head", workspace_id)
+
+        @firestore.transactional
+        def _append_many(transaction) -> str:
+            # One read of the head, same as `append` -- see that method's
+            # own comment on why the read and every write below must be
+            # one transaction.
+            head_snapshot = head_ref.get(transaction=transaction)
+            head = head_snapshot.to_dict() if head_snapshot.exists else None
+            prev = head["signature"] if head else self.GENESIS
+            seq = head["seq"] + 1 if head else 0
+
+            for item in prepared:
+                entry_id = uuid.uuid4().hex
+                entry_ref = self._repo.store.doc("ledger", entry_id)
+                payload = {
+                    "workspace_id": workspace_id,
+                    "actor": item["actor"],
+                    "action": item["action"],
+                    "detail": item["detail"],
+                    "seq": seq,
+                    "at": item["at"],
+                }
+                signature = self._sign(prev, payload)
+                entry = {**payload, "id": entry_id, "prev": prev, "signature": signature}
+                transaction.set(entry_ref, entry)
+                prev = signature
+                seq += 1
+
+            transaction.set(head_ref, {"seq": seq - 1, "signature": prev})
+            return prev
+
+        return _append_many(self._repo.store.transaction())
+
     def verify(self, workspace_id: str) -> bool:
         # No caller yet in this codebase -- Task 14c wires this to
         # GET /api/ledger/verify and Task 17d puts a "verify chain" control

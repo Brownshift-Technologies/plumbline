@@ -36,7 +36,6 @@ figure).
 
 import time
 import uuid
-from unittest.mock import patch as _time_patch
 
 from app.models import Behaviour, Finding, Patch, Route, Run, Step, Workspace
 from gateway.ledger import Ledger
@@ -324,24 +323,23 @@ def _seed_ledger(repo, ws_id: str) -> None:
     the ledger does not reset -- an audit trail that a later visitor's
     session could rewind would not be much of one. It only ever grows.
 
-    **Timestamps, and why `time.time()` is patched.** `Ledger.append`
+    **Timestamps, and why every entry carries its own `at`.** `Ledger.append`
     takes no `at` argument -- it stamps the moment it is actually called,
     on purpose (see its own docstring: the audit-of-record should not
     trust a caller's own claim about when something happened). That is
     exactly right for a live gateway call and exactly wrong for backdating
-    a demo fixture to match runs that "happened" 22/67/112 minutes ago:
-    calling `append` for all of these right now would sign every entry
-    with the current instant, and a ledger dated all-identical (or,
-    worse, 1970) would undercut the same credibility Task 15's finding-age
-    fix round already spent effort protecting (see `_FINDINGS`'s own
-    comment above). Neither `gateway/ledger.py` nor `Ledger.append`'s
-    signature may change here (out of scope for this task), so this seed
-    reaches for the same lever `tests/test_ledger.py`'s own retry test
-    uses against the identical line of code: `time.time` is patched, one
-    entry at a time, to the timestamp that entry should carry, for just
-    the duration of that one `append` call. The signed payload embeds
-    whichever value `time.time()` returned at signing time either way;
-    this only changes what that value honestly was.
+    a demo fixture to match runs that "happened" 22/67/112 minutes ago.
+    `Ledger.append_many` (fix round 2) is built for precisely this: a
+    single-writer, fully-known-up-front chain, where every entry supplies
+    its own `at`. This function used to call `Ledger.append` once per
+    entry with `time.time` patched around each call -- correct, but 31
+    sequential Firestore transactions all contending on the same
+    `ledger_head` document, which is instant against the in-memory fake
+    this task's own tests run against and a `DeadlineExceeded` 500 against
+    real Firestore in production (`POST /api/auth/demo` is the route that
+    calls this). `append_many` reads the head once and writes the whole
+    chain -- entries and the final head -- in one transaction, so seeding
+    stays exactly as correct and stops being O(N) round trips.
 
     **Ordering.** `seq` and the hash chain follow insertion order, not the
     `at` field (`Ledger.entries` re-sorts by `seq`, `Ledger.verify` walks
@@ -462,9 +460,13 @@ def _seed_ledger(repo, ws_id: str) -> None:
         events.append((start_4471 + offset, *_gateway_event(agent, tool, target, extra)))
 
     events.sort(key=lambda e: e[0])
-    for at, actor, action, detail in events:
-        with _time_patch("time.time", return_value=at):
-            ledger.append(ws_id, actor, action, detail)
+    ledger.append_many(
+        ws_id,
+        [
+            {"actor": actor, "action": action, "detail": detail, "at": at}
+            for at, actor, action, detail in events
+        ],
+    )
 
 
 def seed_demo(repo, config) -> Workspace:

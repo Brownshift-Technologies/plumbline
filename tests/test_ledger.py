@@ -392,3 +392,154 @@ def test_entries_page_reads_through_query_page_not_the_whole_chain(monkeypatch):
     # At least one of the streamed queries carried the seq ordering and a
     # real limit -- the signature no plain, unbounded `query()` call has.
     assert any(order == "seq" and limit == 2 for order, limit in calls)
+
+
+# --- fix round 2: append_many -- bulk seeding must be ONE transaction ----
+# (POST /api/auth/demo went 500 DeadlineExceeded in production: seed/demo.py
+# called Ledger.append 31 times, each its own serialised, contended
+# Firestore transaction -- instant against FakeFirestore, fatal against
+# real Firestore. See gateway/ledger.py's append_many docstring.)
+
+
+def test_append_many_produces_a_chain_that_verifies():
+    lg = _ledger()
+    sig = lg.append_many(
+        "ws1",
+        [{"actor": "cartographer", "action": "browser.read", "detail": {"i": i}} for i in range(5)],
+    )
+    entries = lg.entries("ws1")
+    assert [e["seq"] for e in entries] == [0, 1, 2, 3, 4]
+    assert entries[0]["prev"] == Ledger.GENESIS
+    assert entries[-1]["signature"] == sig
+    assert lg.verify("ws1") is True
+
+
+def test_append_many_chains_onto_an_existing_head():
+    lg = _ledger()
+    lg.append("ws1", "a", "first", {})
+    first_sig = lg.entries("ws1")[0]["signature"]
+
+    lg.append_many("ws1", [{"actor": "b", "action": f"tool.{i}", "detail": {}} for i in range(3)])
+
+    entries = lg.entries("ws1")
+    assert [e["seq"] for e in entries] == [0, 1, 2, 3]
+    assert entries[1]["prev"] == first_sig
+    assert lg.verify("ws1") is True
+
+
+def test_a_chain_built_by_append_then_append_many_then_append_verifies():
+    # Seeding followed by real agent activity is precisely what a real
+    # workspace does: seed/demo.py's append_many, then the gateway's own
+    # per-tool-call append as agents actually run.
+    lg = _ledger()
+    lg.append("ws1", "a", "first", {})
+    lg.append_many("ws1", [{"actor": "b", "action": f"tool.{i}", "detail": {}} for i in range(4)])
+    lg.append("ws1", "c", "last", {})
+
+    entries = lg.entries("ws1")
+    assert [e["seq"] for e in entries] == list(range(6))
+    assert lg.verify("ws1") is True
+
+
+def test_append_many_is_one_transaction_not_n(monkeypatch):
+    # The test with teeth for the production fix: however many entries are
+    # seeded, exactly one Firestore transaction -- one network round trip
+    # -- is opened. Before this fix, N entries meant N.
+    lg, fake = _ledger_with_fake()
+    calls: list[int] = []
+    original_transaction = fakes.FakeFirestore.transaction
+
+    def counting_transaction(self, max_attempts=5):
+        calls.append(1)
+        return original_transaction(self, max_attempts)
+
+    monkeypatch.setattr(fakes.FakeFirestore, "transaction", counting_transaction)
+
+    for n, ws in [(1, "ws-one"), (5, "ws-five"), (31, "ws-thirty-one")]:
+        calls.clear()
+        lg.append_many(ws, [{"actor": "seed", "action": f"tool.{i}", "detail": {}} for i in range(n)])
+        assert len(calls) == 1, f"expected exactly one transaction for {n} entries, got {len(calls)}"
+
+
+def test_append_many_with_an_empty_list_is_a_no_op(monkeypatch):
+    lg, fake = _ledger_with_fake()
+    calls: list[int] = []
+    original_transaction = fakes.FakeFirestore.transaction
+
+    def counting_transaction(self, max_attempts=5):
+        calls.append(1)
+        return original_transaction(self, max_attempts)
+
+    monkeypatch.setattr(fakes.FakeFirestore, "transaction", counting_transaction)
+
+    # Fresh workspace: no entries, no head document at all.
+    sig = lg.append_many("ws1", [])
+    assert sig == Ledger.GENESIS
+    assert lg.entries("ws1") == []
+    assert calls == [], "an empty append_many must not open a transaction"
+
+    # A workspace with an existing chain: head is returned unchanged, and
+    # nothing new is written.
+    lg.append("ws1", "a", "x", {})
+    head_sig = lg.entries("ws1")[0]["signature"]
+    calls.clear()
+    sig2 = lg.append_many("ws1", [])
+    assert sig2 == head_sig
+    assert len(lg.entries("ws1")) == 1
+    assert calls == []
+
+
+def test_a_concurrent_append_during_append_many_does_not_fork():
+    # Same interleaving trick as
+    # test_concurrent_appends_to_one_workspace_do_not_fork_the_chain above,
+    # aimed at append_many instead: a real, independent `append` call runs
+    # to completion from inside append_many's own (single) head read,
+    # forcing append_many's transaction to abort -- the head it read is now
+    # stale -- and retry against the head the solo writer just committed.
+    # This is the property the whole fix depends on: collapsing N
+    # transactions into one must not reopen the fork append's own
+    # transactional head-read-plus-write was built to prevent.
+    fake = FakeFirestore()
+    lg_bulk = Ledger(Repo(_config(), client=fake))
+    lg_solo = Ledger(Repo(_config(), client=fake))
+
+    original_get = fakes.FakeDoc.get
+    interleaved = []
+
+    def get_then_let_the_other_writer_in(self, transaction=None):
+        snapshot = original_get(self, transaction=transaction)
+        if self._path == "plumbline_ledger_head/ws1" and not interleaved:
+            interleaved.append(True)
+            lg_solo.append("ws1", "solo", "race.solo", {})
+        return snapshot
+
+    fakes.FakeDoc.get = get_then_let_the_other_writer_in
+    try:
+        lg_bulk.append_many(
+            "ws1",
+            [{"actor": "bulk", "action": f"tool.{i}", "detail": {}} for i in range(3)],
+        )
+    finally:
+        fakes.FakeDoc.get = original_get
+
+    assert interleaved == [True], "the interleaving never happened"
+    entries = lg_bulk.entries("ws1")
+    assert len(entries) == 4  # solo's 1 + bulk's 3
+    assert [e["seq"] for e in entries] == [0, 1, 2, 3]  # contiguous, no fork
+    assert entries[0]["actor"] == "solo"  # solo's commit landed first
+    for i in range(1, len(entries)):
+        assert entries[i]["prev"] == entries[i - 1]["signature"]
+    assert lg_bulk.verify("ws1") is True
+
+
+def test_append_many_redacts_and_uses_the_provided_at():
+    lg = _ledger()
+    lg.append_many(
+        "ws1",
+        [{"actor": "reach sam@example.com", "action": "note", "detail": {"note": "sam@example.com"}, "at": 12345.0}],
+    )
+    entry = lg.entries("ws1")[0]
+    assert entry["actor"] == "reach [EMAIL]"
+    assert entry["detail"] == {"note": "[EMAIL]"}
+    assert entry["at"] == 12345.0
+    assert lg.verify("ws1") is True
