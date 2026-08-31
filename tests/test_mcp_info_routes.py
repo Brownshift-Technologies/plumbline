@@ -61,3 +61,21 @@ def test_summaries_are_one_sentence_not_the_whole_model_prompt(client_as_owner):
 
 def test_an_anonymous_caller_gets_401(client):
     assert client.get("/api/mcp/info").status_code == 401
+
+
+def test_the_endpoint_uses_the_scheme_the_client_actually_reached_us_on(client_as_owner):
+    """Cloud Run terminates TLS in front of the container.
+
+    `request.base_url` therefore reports `http://` in production, and a
+    customer copying that into an MCP client gets a URL that does not work.
+    The proxy's own `X-Forwarded-Proto` is the only thing that knows.
+    """
+    r = client_as_owner.get("/api/mcp/info", headers={"X-Forwarded-Proto": "https"})
+    assert r.json()["endpoint"].startswith("https://")
+
+    # And a comma-separated chain (proxy behind proxy) takes the first hop.
+    r = client_as_owner.get("/api/mcp/info", headers={"X-Forwarded-Proto": "https, http"})
+    assert r.json()["endpoint"].startswith("https://")
+
+    # No proxy at all: fall back to what the request itself says.
+    assert client_as_owner.get("/api/mcp/info").json()["endpoint"].startswith("http")

@@ -26,7 +26,16 @@ router = APIRouter(prefix="/api/mcp")
 
 @router.get("/info")
 def mcp_info(request: Request, sess=Depends(current_session)):
+    # `request.base_url` reports http:// behind Cloud Run, which terminates
+    # TLS in front of the container, so the scheme it sees is the internal
+    # one. Handing a customer an http:// MCP endpoint to paste into a client
+    # is a broken URL, so trust the proxy's own X-Forwarded-Proto and fall
+    # back to what the request claims only when there is no proxy (local
+    # development).
+    forwarded = request.headers.get("x-forwarded-proto", "").split(",")[0].strip()
     base = str(request.base_url).rstrip("/")
+    if forwarded:
+        base = f"{forwarded}://{request.url.netloc}"
     repo = request.app.state.repo
     role = "reader" if sess.is_demo else (repo.role_of(sess.user_id, sess.workspace_id) or "reader")
     return {
