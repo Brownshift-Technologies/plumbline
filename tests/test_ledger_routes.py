@@ -53,3 +53,45 @@ def test_ledger_reads_do_not_see_another_workspaces_entries(client_as_owner, led
     ledger.append("ws-other", "surgeon", "pr.merge", {"decision": "allowed"})
     r = client_as_owner.get("/api/ledger").json()
     assert r["total"] == 0
+
+
+# --- fix round 1: the CSV export must actually READ in bounded pages, ------
+# not just stream a response built from one big list underneath -----------
+
+
+def test_the_csv_export_never_calls_the_full_chain_read(client_as_owner, ledger, monkeypatch):
+    """Test with teeth for the fix-round finding: `ledger_csv` used to
+    stream the HTTP response while still reading the whole chain via
+    `Ledger.entries` underneath. Monkeypatching `entries` to explode is
+    what actually fails if that regression comes back -- asserting on the
+    CSV body's content (which passes either way) would not."""
+    import gateway.ledger as ledger_module
+
+    for i in range(3):
+        ledger.append("ws1", "surgeon", f"tool.{i}", {"decision": "allowed"})
+
+    def explode(self, workspace_id):
+        raise AssertionError("ledger_csv must read via entries_page, not entries()")
+
+    monkeypatch.setattr(ledger_module.Ledger, "entries", explode)
+    r = client_as_owner.get("/api/ledger.csv")
+    assert r.status_code == 200
+    assert len(r.text.strip().splitlines()) == 4  # header + 3 entries
+
+
+def test_the_csv_export_walks_multiple_pages_correctly(client_as_owner, ledger):
+    import app.ledger_routes as ledger_routes
+
+    original_page_size = ledger_routes._CSV_PAGE_SIZE
+    ledger_routes._CSV_PAGE_SIZE = 2  # force >1 page for a handful of entries
+    try:
+        for i in range(5):
+            ledger.append("ws1", "surgeon", f"tool.{i}", {"decision": "allowed"})
+        r = client_as_owner.get("/api/ledger.csv")
+    finally:
+        ledger_routes._CSV_PAGE_SIZE = original_page_size
+
+    lines = r.text.strip().splitlines()
+    assert len(lines) == 6  # header + 5 entries, no duplicates, no gaps
+    seqs = [int(line.split(",")[0]) for line in lines[1:]]
+    assert seqs == [0, 1, 2, 3, 4]

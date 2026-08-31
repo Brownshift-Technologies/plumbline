@@ -49,13 +49,31 @@ def test_creating_a_run_returns_202_and_an_id(client_as_owner, stub_enqueue):
     assert stub_enqueue == [("plumbline-worker", {"PLUMBLINE_RUN_ID": body["id"]})]
 
 
-def test_creating_a_run_does_not_block_on_the_fleet(client_as_owner):
+def test_creating_a_run_does_not_block_on_the_fleet(client_as_owner, monkeypatch):
+    """Fix round 1: an elapsed-time bound alone has no teeth -- the whole
+    orchestrator suite runs in well under a second against `FakeFirestore`
+    too, so a regression that ran the fleet in-process, synchronously,
+    against the SAME fake store this test's own `client_as_owner` uses
+    would still finish in well under 1.0s and this test would keep
+    passing. Asserting on BEHAVIOUR -- monkeypatching
+    `job.orchestrator.Orchestrator.execute` to record whether it was ever
+    called at all -- is what actually fails against the regression this
+    test is named for; the elapsed-time check stays as a secondary,
+    real-world sanity bound (minutes vs. sub-second), not the guard
+    itself."""
+    from job.orchestrator import Orchestrator
+
+    calls = []
+    monkeypatch.setattr(Orchestrator, "execute", lambda self, run_id: calls.append(run_id))
+
     started = time.monotonic()
     r = client_as_owner.post("/api/runs", json={"trigger": "manual"})
     elapsed = time.monotonic() - started
+
     assert r.status_code == 202
+    assert calls == [], "POST /api/runs must never call Orchestrator.execute in-process"
     # A real fleet run takes minutes; this must return in well under a
-    # second, proving nothing here ran the orchestrator in-process.
+    # second -- a coarser, secondary signal alongside the assertion above.
     assert elapsed < 1.0
 
 

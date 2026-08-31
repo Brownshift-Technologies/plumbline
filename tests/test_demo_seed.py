@@ -96,3 +96,27 @@ def test_reseeding_restores_the_pristine_fixture(repo, config):
     seed_demo(repo, config)
 
     assert repo.patch_for_finding(finding.id).gate_state == "awaiting_approval"
+
+
+def test_finding_ages_match_the_design_exactly(repo, config):
+    """Fix round 1: the original seed used `now - offset * 3600` (0-6
+    hours across all seven findings) -- off by two orders of magnitude
+    from `design/preview.html`'s own Findings table (22 min / 2 days / 3
+    days / 4 days / 9 days). A judge opening Findings must see materially
+    the same data the approved design shows."""
+    import time
+
+    from seed.demo import seed_demo
+
+    ws = seed_demo(repo, config)
+    now = time.time()
+    by_title = {f.title: f for f in repo.findings_for_workspace(ws.id)}
+
+    def age_days(title: str) -> float:
+        return (now - by_title[title].at) / 86400
+
+    assert age_days("A retried payment charges the customer twice") < (1 / 24)  # well under an hour
+    assert 1.9 < age_days("Changing a password doesn't end other sessions") < 2.1
+    assert 2.9 < age_days("Cart total drifts a cent when currency changes") < 3.1
+    assert 3.9 < age_days("Order history paginates past the last page") < 4.1
+    assert 8.9 < age_days("Admin pricing table sorts unstably") < 9.1

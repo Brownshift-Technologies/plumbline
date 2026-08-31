@@ -74,6 +74,33 @@ class Ledger:
         rows = self._repo.store.query("ledger", "workspace_id", "==", workspace_id)
         return sorted(rows, key=lambda e: e["seq"])
 
+    def entries_page(self, workspace_id: str, after_seq: int | None = None, limit: int = 200) -> list[dict]:
+        """A bounded, seq-ordered slice of the chain -- real server-side
+        pagination (`Store.query_page`'s `order_by`/`start_after`/`limit`
+        cursor), not `entries()`'s fetch-the-whole-chain-then-slice.
+
+        `GET /api/ledger.csv` (Task 14c, fix round 1) is why this exists:
+        that route streams its `Response`, but was still calling
+        `entries()` underneath -- one Python list holding the ENTIRE
+        workspace chain before the first CSV row was ever written, exactly
+        the "a year of entries must not be built in memory" failure the
+        original brief named, just not in CSV form. This is the CSV
+        writer's read path now; `verify()` keeps calling `entries()`
+        unchanged, because it genuinely needs the whole chain to walk the
+        signature links in order.
+
+        `after_seq=None` is the first page. A caller walks pages by
+        passing the previous page's LAST entry's `seq` back in as
+        `after_seq`, and stops once a page comes back shorter than
+        `limit` (or empty) -- the same "did this page fill up" signal any
+        cursor-paginated read uses.
+        """
+        rows = self._repo.store.query_page(
+            "ledger", "workspace_id", "==", workspace_id,
+            order_by="seq", start_after=after_seq, limit=limit,
+        )
+        return sorted(rows, key=lambda e: e["seq"])
+
     def append(self, workspace_id: str, actor: str, action: str, detail: dict) -> str:
         from google.cloud import firestore
 

@@ -36,6 +36,8 @@ from app.behaviour_routes import router as behaviour_router
 from app.billing_routes import router as billing_router
 from app.docs import register_docs
 from app.finding_routes import router as finding_router
+from app.github import GitHubApp
+from app.github_routes import router as github_router
 from app.ledger_routes import router as ledger_router
 from app.mcp_server import router as mcp_router
 from app.models import User, Workspace
@@ -268,6 +270,19 @@ def build_app(config: PlumblineConfig | None = None, repo: Repo | None = None) -
     # `seed_demo_if_missing`/`deliver_reset_email` just above, so tests can
     # swap in a stub that never resolves real GCP credentials.
     app.state.enqueue_job = lambda job_name, args: enqueue_job(cfg, job_name, args)
+    # Task 14g: read directly from the environment, like
+    # `_INSECURE_DEV_OAUTH_SECRET`'s own OAUTH_STATE_SECRET above -- these
+    # are deploy secrets (a GitHub App private key, a webhook secret),
+    # not `PlumblineConfig` fields (that dataclass is outside this task's
+    # own file list). An empty private key is fine at construction time;
+    # `GitHubApp.installation_token` (the only method that ever signs a
+    # JWT with it) is never reached by the default test suite, which
+    # swaps `app.state.github_app` for `agents.repo_source.FakeGitHub`.
+    app.state.github_app = GitHubApp(
+        os.getenv("GITHUB_APP_ID", ""), os.getenv("GITHUB_APP_PRIVATE_KEY", "").encode(),
+    )
+    app.state.github_app_slug = os.getenv("GITHUB_APP_SLUG", "plumbline")
+    app.state.github_webhook_secret = os.getenv("GITHUB_APP_WEBHOOK_SECRET", "")
 
     app.include_router(auth_router)
     app.include_router(oauth_router)
@@ -283,6 +298,7 @@ def build_app(config: PlumblineConfig | None = None, repo: Repo | None = None) -
     app.include_router(webhooks_router)
     app.include_router(public_router)
     app.include_router(mcp_router)
+    app.include_router(github_router)
     register_docs(app)
 
     @app.get("/_health")

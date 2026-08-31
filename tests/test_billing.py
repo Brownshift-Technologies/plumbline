@@ -15,9 +15,27 @@ def test_billing_reports_both_meters(client_as_owner):
     r = client_as_owner.get("/api/billing")
     body = r.json()
     assert body["plan"] == "team"
-    assert body["meters"]["runs"] == {"used": 0, "limit": 500}
-    assert body["meters"]["seats"]["limit"] == 5
-    assert body["meters"]["seats"]["used"] == 1  # the owner fixture's own membership
+    assert body["runs_used"] == 0 and body["run_limit"] == 500
+    assert body["seat_limit"] == 5
+    assert body["seats_used"] == 1  # the owner fixture's own membership
+
+
+def test_billing_reports_the_fields_the_frontend_actually_reads(client_as_owner):
+    """Fix round 1: `BillingInfo` (web/src/lib/types.ts) and
+    `BillingPane.tsx` read a FLAT shape -- `renews_at`/`interval` were
+    missing entirely, and everything else lived one level down under a
+    `meters` key nothing in the frontend ever looked for. This checks the
+    real, shipped contract field by field rather than just the two
+    explicitly-named-missing ones."""
+    body = client_as_owner.get("/api/billing").json()
+    assert set(body) == {
+        "plan", "price", "interval", "renews_at", "runs_used", "run_limit",
+        "seats_used", "seat_limit", "payment_method",
+    }
+    assert body["interval"] == "monthly"
+    assert isinstance(body["renews_at"], (int, float)) and body["renews_at"] > 0
+    assert body["price"] == 490
+    assert body["payment_method"] == ""
 
 
 def test_a_workspace_at_its_run_limit_cannot_start_a_run(client_at_limit):

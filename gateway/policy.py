@@ -115,7 +115,14 @@ SCOPES: dict[str, frozenset[str]] = {
     # exactly the kind of consequential write that belongs in the audit
     # trail too, not an exception to the pattern every other agent follows.
     "triager":      frozenset({"trace.read", "repo.read", "repo.write:findings"}),
-    "surgeon":      frozenset({"repo.write:src", "pr.open", "pr.merge"}),
+    # "checks.write" added for Task 14g: Surgeon reports a run's outcome
+    # back to GitHub as a check run (`app/github.GitHubApp.create_check_
+    # run`) alongside opening the pull request -- `repo.read`/`pr.open`
+    # already existed for it (Task 9); this is the one new tool Task 14g's
+    # own brief names by name ("Add checks.write for Surgeon"). No other
+    # agent gets it, and Economist -- see its own note below -- gains
+    # nothing at all from this task.
+    "surgeon":      frozenset({"repo.write:src", "pr.open", "pr.merge", "checks.write"}),
     # Added in Task 9's fix round 1: these four exist in the fleet (Task 9's
     # brief names all eleven) but were left out of SCOPES because Task 9's
     # own file list never included this module. Leaving them out any

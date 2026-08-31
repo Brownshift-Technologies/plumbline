@@ -6,16 +6,23 @@ test rather than one this product merely asserts -- it runs
 out by name as a forward dependency) and reports `{"intact": bool,
 "checked": n}`.
 
-`GET /api/ledger.csv` streams. `csv.writer` cannot write to an async
-generator directly (it wants a file-like `.write()`), so `_Sink` below is
-the smallest thing that satisfies that interface while actually handing
-each written row straight back to the generator -- one row is ever held
-in memory at a time, never the whole export. See `core.store.Store`'s
-own module docstring for why a workspace's ledger has no row-count
-ceiling in the first place (`gateway/ledger.py`: one document per entry,
-not one document holding a growing list) -- an export that materialised
-the whole thing first would reintroduce exactly the ceiling the storage
-shape was chosen to avoid.
+`GET /api/ledger.csv` streams -- and, as of fix round 1, actually reads in
+bounded pages too. `csv.writer` cannot write to an async generator
+directly (it wants a file-like `.write()`), so `_Sink` below is the
+smallest thing that satisfies that interface while actually handing each
+written row straight back to the generator -- one row is ever held in
+memory at a time on the WRITE side. The read side used to call
+`Ledger.entries` (the whole chain, one Python list) underneath that
+streamed response, which quietly kept the "never build a year of entries
+in memory" promise from actually being true -- streaming the RESPONSE is
+not the same thing as streaming the READ. `rows()` below now walks
+`Ledger.entries_page` in `_CSV_PAGE_SIZE`-sized pages instead, so the
+bound on what is ever resident in memory at once is one page, not one
+workspace's whole history. See `core.store.Store`'s own module docstring
+for why a workspace's ledger has no row-count ceiling in the first place
+(`gateway/ledger.py`: one document per entry, not one document holding a
+growing list) -- this is what actually keeps an unbounded ledger from
+becoming an unbounded read.
 """
 
 import csv
@@ -34,6 +41,11 @@ router = APIRouter()
 _MAX_PAGE_SIZE = 200
 _DEFAULT_PAGE_SIZE = 50
 _CSV_FIELDS = ("seq", "at", "actor", "action", "target", "decision", "detail")
+# The page size `ledger_csv` reads at, independent of `_MAX_PAGE_SIZE`
+# (the JSON listing's own query-param-controlled cap) -- this one is never
+# caller-controlled, so it can stay small without a client having any way
+# to force it back up.
+_CSV_PAGE_SIZE = 500
 
 
 class _Sink:
@@ -96,16 +108,23 @@ def ledger_csv(request: Request, sess=Depends(current_session)):
         writer = csv.DictWriter(sink, fieldnames=_CSV_FIELDS)
         writer.writeheader()
         yield sink.value
-        # `Ledger.entries` already returns the whole workspace's chain as
-        # a Python list (it has to, to sort by `seq` -- see that module's
-        # own docstring), so the "does not materialise a year of entries"
-        # guarantee here is about the HTTP RESPONSE, not the Firestore
-        # read: this endpoint never builds a second, CSV-formatted copy of
-        # the whole export in memory, and the client never waits for the
-        # whole file before the first byte arrives.
-        for entry in ledger.entries(sess.workspace_id):
-            writer.writerow(_entry_row(entry))
-            yield sink.value
+        # Walk `entries_page` rather than call `Ledger.entries` -- fix
+        # round 1: a page (`_CSV_PAGE_SIZE` rows) is the most this ever
+        # holds in memory at once, not the workspace's entire chain. A
+        # short page (or an empty one) ends the walk -- the standard
+        # cursor-pagination "did this page fill up" signal, not a
+        # separate count/total call.
+        after_seq: int | None = None
+        while True:
+            page = ledger.entries_page(sess.workspace_id, after_seq=after_seq, limit=_CSV_PAGE_SIZE)
+            if not page:
+                return
+            for entry in page:
+                writer.writerow(_entry_row(entry))
+                yield sink.value
+            after_seq = page[-1]["seq"]
+            if len(page) < _CSV_PAGE_SIZE:
+                return
 
     return StreamingResponse(rows(), media_type="text/csv", headers={
         "Content-Disposition": "attachment; filename=ledger.csv",

@@ -121,9 +121,26 @@ class FakeDoc:
 
 
 class FakeCollection:
-    def __init__(self, client, name, filters=()):
+    def __init__(self, client, name, filters=(), order_field=None, limit_n=None, after_value=None):
         self._client, self._name = client, name
         self._filters = tuple(filters)
+        # Added for `core.store.Store.query_page` (ledger CSV export
+        # pagination, fix round 1): real server-side ordering/cursor/limit,
+        # not client-side slicing after a full fetch. All three default to
+        # `None` and every existing caller (`where()` alone, no chaining)
+        # is completely unaffected -- `stream()` below only applies them
+        # when set.
+        self._order_field = order_field
+        self._limit_n = limit_n
+        self._after_value = after_value
+
+    def _clone(self, **overrides) -> "FakeCollection":
+        kwargs = dict(
+            filters=self._filters, order_field=self._order_field,
+            limit_n=self._limit_n, after_value=self._after_value,
+        )
+        kwargs.update(overrides)
+        return FakeCollection(self._client, self._name, **kwargs)
 
     def document(self, doc_id) -> FakeDoc:
         return FakeDoc(self._client, f"{self._name}/{doc_id}")
@@ -136,15 +153,44 @@ class FakeCollection:
         collection keeps returning everything.
         """
         spec = _normalise_filter(field_path, op_string, value, filter)
-        return FakeCollection(self._client, self._name, self._filters + (spec,))
+        return self._clone(filters=self._filters + (spec,))
+
+    def order_by(self, field, direction=None) -> "FakeCollection":
+        # `direction` is accepted only for signature compatibility with the
+        # real client's `Query.order_by` -- this fake always sorts
+        # ascending, which is all `Ledger.entries_page` (seq, monotonic)
+        # ever needs.
+        return self._clone(order_field=field)
+
+    def limit(self, n) -> "FakeCollection":
+        return self._clone(limit_n=n)
+
+    def start_after(self, cursor) -> "FakeCollection":
+        """Real client: a `dict` of `{field: value}` or a `DocumentSnapshot`.
+        This fake supports only the dict form -- the only one
+        `core.store.Store.query_page` ever passes -- keyed by whatever
+        field `order_by` was already called with; `order_by` must be
+        called first, matching the real client's own requirement that a
+        cursor's fields match the query's ordering."""
+        if self._order_field is None:
+            raise ValueError("start_after needs order_by to already be set")
+        value = cursor[self._order_field] if isinstance(cursor, dict) else getattr(cursor, self._order_field)
+        return self._clone(after_value=value)
 
     def stream(self):
         prefix = f"{self._name}/"
-        return [
-            FakeSnapshot(value, key[len(prefix):])
+        rows = [
+            (key[len(prefix):], value)
             for key, value in self._client.data.items()
             if key.startswith(prefix) and all(_matches(value, spec) for spec in self._filters)
         ]
+        if self._order_field is not None:
+            rows.sort(key=lambda kv: kv[1].get(self._order_field))
+        if self._after_value is not None:
+            rows = [kv for kv in rows if kv[1].get(self._order_field) > self._after_value]
+        if self._limit_n is not None:
+            rows = rows[: self._limit_n]
+        return [FakeSnapshot(value, doc_id) for doc_id, value in rows]
 
 
 _TRANSACTION_IDS = itertools.count(1)

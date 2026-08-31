@@ -77,22 +77,36 @@ _PAYMENTS_DIFF = """--- a/src/checkout/payment-client.ts
  }
 """
 
-# (id_suffix, title, route, found_by, status, severity, repro_count)
-_FINDINGS: list[tuple[str, str, str, str, str, str, int]] = [
+# (id_suffix, title, route, found_by, status, severity, repro_count, age_seconds)
+#
+# `age_seconds` -- fix round 1. `design/preview.html`'s own Findings table
+# (lines ~703-709) shows ages of 22 min / 2 days / 3 days / 4 days / 9 days
+# for its five listed findings; the original seed used `now - offset *
+# 3600` (0-6 HOURS across all seven), off by two orders of magnitude from
+# what a judge clicking through the demo actually sees in the approved
+# design. Every age below matches the design's own number exactly for the
+# five findings it names. `3ds_uncovered` and `bulk_duplicate_sku` are not
+# in the design's own findings table at all -- both are this seed's own
+# additions, needed to reach the seven findings Task 15 requires -- so
+# their ages (12 and 15 days) are chosen only to read as plausibly older
+# and lower-priority than the five the design shows, not matched against
+# anything in `design/preview.html` because there is nothing there to
+# match.
+_FINDINGS: list[tuple[str, str, str, str, str, str, int, int]] = [
     ("double_charge", "A retried payment charges the customer twice",
-     "/checkout/payment", "chaos", "patch_ready", "high", 5),
+     "/checkout/payment", "chaos", "patch_ready", "high", 5, 22 * 60),
     ("password_sessions", "Changing a password doesn't end other sessions",
-     "/account/security", "chaos", "triaged", "high", 0),
+     "/account/security", "chaos", "triaged", "high", 0, 2 * 86400),
     ("cart_drift", "Cart total drifts a cent when currency changes",
-     "/cart", "runner", "tolerance", "medium", 0),
+     "/cart", "runner", "tolerance", "medium", 0, 3 * 86400),
     ("orders_pagination", "Order history paginates past the last page",
-     "/account/orders", "cartographer", "needs_repro", "low", 0),
+     "/account/orders", "cartographer", "needs_repro", "low", 0, 4 * 86400),
     ("pricing_sort", "Admin pricing table sorts unstably",
-     "/admin/pricing", "runner", "accepted", "low", 0),
+     "/admin/pricing", "runner", "accepted", "low", 0, 9 * 86400),
     ("3ds_uncovered", "3-D Secure step-up has no behaviour written",
-     "/checkout/3ds", "cartographer", "triaged", "medium", 0),
+     "/checkout/3ds", "cartographer", "triaged", "medium", 0, 12 * 86400),
     ("bulk_duplicate_sku", "Admin bulk pricing upload accepts a duplicate SKU",
-     "/admin/pricing/bulk", "runner", "triaged", "medium", 0),
+     "/admin/pricing/bulk", "runner", "triaged", "medium", 0, 15 * 86400),
 ]
 
 # The five runs the design names explicitly, newest first --
@@ -161,11 +175,11 @@ def _seed_behaviours(repo, ws_id: str) -> None:
 def _seed_findings_and_patch(repo, ws_id: str) -> dict[str, Finding]:
     now = time.time()
     findings: dict[str, Finding] = {}
-    for offset, (key, title, route, found_by, status, severity, repro) in enumerate(_FINDINGS):
+    for key, title, route, found_by, status, severity, repro, age_seconds in _FINDINGS:
         finding = Finding(
             id=f"finding_{key}", workspace_id=ws_id, title=title, route=route,
             found_by=found_by, status=status, severity=severity, repro_count=repro,
-            at=now - offset * 3600,
+            at=now - age_seconds,
         )
         repo.put_finding(finding)
         findings[key] = finding

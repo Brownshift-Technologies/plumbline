@@ -104,6 +104,37 @@ class Store:
         results = collection_ref.where(filter=FieldFilter(field, op, value)).stream()
         return [doc.to_dict() for doc in results]
 
+    def query_page(
+        self, collection: str, field: str, op: str, value, *,
+        order_by: str, start_after=None, limit: int = 200,
+    ) -> list[dict]:
+        """Like `query`, but with REAL server-side pagination -- Firestore's
+        own `order_by`/`start_after`/`limit` cursor -- rather than `query`'s
+        "fetch every matching document, always" shape. Added for
+        `gateway/ledger.py`'s `entries_page`: `GET /api/ledger.csv` (Task
+        14c, fix round 1) must not hold a year of ledger entries as one
+        Python list before writing the first CSV row, and `query` cannot
+        avoid that -- it has no `limit` at all.
+
+        `start_after` is the ordering field's own value from the last row
+        of the previous page (Firestore's own cursor convention: a value to
+        page from, not a row count to skip) -- `None` for the first page.
+        `core.fakes.FakeCollection` implements the identical
+        `where().order_by().limit().start_after()` chain so this behaves
+        the same against a real Firestore client and this suite's fake.
+        """
+        from google.cloud.firestore_v1.base_query import FieldFilter
+
+        ref = (
+            self._client.collection(self._name(collection))
+            .where(filter=FieldFilter(field, op, value))
+            .order_by(order_by)
+            .limit(limit)
+        )
+        if start_after is not None:
+            ref = ref.start_after({order_by: start_after})
+        return [doc.to_dict() for doc in ref.stream()]
+
     def all(self, collection: str) -> list[dict]:
         """Every document in `collection`, unfiltered -- `query()` with no
         `where()` clause at all rather than a degenerate filter, because

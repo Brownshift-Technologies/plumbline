@@ -117,6 +117,22 @@ class Workspace:
     # Plumbline-side schema to validate beyond "has a name and a url",
     # the same trade `gate_rules` already makes for the identical reason.
     mcp_servers: tuple[dict, ...] = ()
+    # Task 14g: the connected GitHub App installation. `installation_id`
+    # is GitHub's own id for this workspace's app installation (empty
+    # until `GET /api/github/callback` succeeds); `repo_full_name`
+    # (`"acme/storefront"`) and `default_branch` (`"main"`) are set
+    # together by `POST /api/workspaces/{id}/repo` once a customer picks
+    # ONE repo from `GET /api/github/repos` to connect. Deliberately
+    # separate from the pre-existing `repo` field above (a free-text
+    # display string every workspace has carried since Task 1, still read
+    # by fixtures and the dashboard) rather than repurposing it -- this
+    # task's brief names `repo_full_name` as its own field, and giving the
+    # GitHub-App-authoritative identity its own name means nothing that
+    # already reads `Workspace.repo` needs to change meaning out from
+    # under it.
+    installation_id: str = ""
+    repo_full_name: str = ""
+    default_branch: str = "main"
 
 
 @dataclass(frozen=True)

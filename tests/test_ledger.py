@@ -321,3 +321,74 @@ def test_the_recorded_time_does_not_drift_across_a_retry(monkeypatch):
     # from whichever attempt happened to be the one that committed.
     assert entries["b"]["at"] == 200.0
     assert entries["a"]["at"] == 100.0
+
+
+# --- entries_page (fix round 1: GET /api/ledger.csv must not build a ------
+# whole workspace's chain in memory -- see gateway/ledger.py's own
+# docstring and app/ledger_routes.py's ledger_csv) --------------------------
+
+
+def test_entries_page_returns_a_bounded_seq_ordered_slice():
+    lg = _ledger()
+    for i in range(5):
+        lg.append("ws1", "surgeon", f"tool.{i}", {})
+    page = lg.entries_page("ws1", limit=2)
+    assert [e["seq"] for e in page] == [0, 1]
+
+
+def test_entries_page_walks_the_whole_chain_via_the_cursor():
+    lg = _ledger()
+    for i in range(5):
+        lg.append("ws1", "surgeon", f"tool.{i}", {})
+
+    seen: list[int] = []
+    after = None
+    for _ in range(10):  # bounded loop -- a real walk terminates well before this
+        page = lg.entries_page("ws1", after_seq=after, limit=2)
+        if not page:
+            break
+        seen.extend(e["seq"] for e in page)
+        after = page[-1]["seq"]
+    assert seen == [0, 1, 2, 3, 4]
+
+
+def test_entries_page_never_returns_a_seq_at_or_before_the_cursor():
+    lg = _ledger()
+    for i in range(3):
+        lg.append("ws1", "surgeon", f"tool.{i}", {})
+    page = lg.entries_page("ws1", after_seq=1, limit=10)
+    assert [e["seq"] for e in page] == [2]
+
+
+def test_entries_page_does_not_leak_across_workspaces():
+    lg = _ledger()
+    lg.append("ws1", "surgeon", "tool.a", {})
+    lg.append("ws-other", "surgeon", "tool.b", {})
+    page = lg.entries_page("ws1", limit=10)
+    assert [e["workspace_id"] for e in page] == ["ws1"]
+
+
+def test_entries_page_reads_through_query_page_not_the_whole_chain(monkeypatch):
+    """`entries_page` must call `Store.query_page` (the bounded, real-
+    pagination read) -- not fall back to `entries()`'s full-chain fetch
+    under the hood. This is the test with teeth for the fix-round claim:
+    a regression that quietly re-routed `entries_page` through `query`
+    (unbounded) would sail through every purely-behavioural test above,
+    since a small fixture chain looks identical either way."""
+    lg, fake = _ledger_with_fake()
+    for i in range(3):
+        lg.append("ws1", "surgeon", f"tool.{i}", {})
+
+    calls = []
+    original = fakes.FakeCollection.stream
+
+    def spying_stream(self):
+        calls.append((self._order_field, self._limit_n))
+        return original(self)
+
+    monkeypatch.setattr(fakes.FakeCollection, "stream", spying_stream)
+    lg.entries_page("ws1", limit=2)
+
+    # At least one of the streamed queries carried the seq ordering and a
+    # real limit -- the signature no plain, unbounded `query()` call has.
+    assert any(order == "seq" and limit == 2 for order, limit in calls)
