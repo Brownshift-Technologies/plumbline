@@ -168,6 +168,72 @@ def test_behaviours_for_workspace():
     assert [b.id for b in r.behaviours_for_workspace("ws1")] == ["b1"]
 
 
+# --- Task 2 review carry-forward: tuple fields against a real Firestore ----
+#
+# `core.fakes.FakeFirestore` round-trips through `copy.deepcopy`, which
+# preserves whatever type a test constructed a row with -- so the offline
+# suite alone never proves this. These tests instead call `_rebuild`
+# directly with a hand-built dict whose array fields are plain `list`s, the
+# shape a real `google-cloud-firestore` client actually hands back, and
+# assert the rebuilt dataclass still matches its own `tuple[...]`
+# annotation.
+
+
+def test_rebuild_coerces_a_list_tags_field_back_to_the_declared_tuple():
+    from app.repo import _rebuild
+
+    data = {
+        "id": "b1",
+        "workspace_id": "ws1",
+        "text": "user can checkout",
+        "route": "/checkout",
+        "tags": ["sentinel", "flaky"],  # list, as a real Firestore read hands back
+    }
+    behaviour = _rebuild(Behaviour, data)
+    assert type(behaviour.tags) is tuple
+    assert behaviour.tags == ("sentinel", "flaky")
+
+
+def test_rebuild_coerces_a_list_files_field_back_to_the_declared_tuple():
+    from app.repo import _rebuild
+
+    data = {
+        "id": "p1",
+        "finding_id": "f1",
+        "diff": "--- a\n+++ b",
+        "files": ["a.py", "b.py"],  # list, as a real Firestore read hands back
+    }
+    patch = _rebuild(Patch, data)
+    assert type(patch.files) is tuple
+    assert patch.files == ("a.py", "b.py")
+
+
+def test_behaviours_for_workspace_survives_a_real_firestore_style_list_field():
+    # End-to-end version of the two `_rebuild` tests above: a document
+    # already sitting in the fake store with `tags` as a `list` (as a real
+    # Firestore document would decode) must still come back typed `tuple`
+    # via the normal read path, not just via a direct `_rebuild` call.
+    r = _repo()
+    r.store.put(
+        "behaviours",
+        "b1",
+        {
+            "id": "b1",
+            "workspace_id": "ws1",
+            "text": "user can checkout",
+            "route": "/checkout",
+            "spec_path": "",
+            "tags": ["sentinel"],
+            "owner": "",
+            "status": "active",
+            "source": "author",
+        },
+    )
+    behaviour = r.behaviours_for_workspace("ws1")[0]
+    assert type(behaviour.tags) is tuple
+    assert behaviour.tags == ("sentinel",)
+
+
 # --- frozen dataclasses support the copy idiom used elsewhere in the plan --
 
 

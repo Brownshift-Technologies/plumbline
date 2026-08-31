@@ -5,7 +5,9 @@ every write flattens a dataclass to a dict via `models.to_dict` before
 handing it to Store. Callers never see a raw Firestore dict.
 """
 
+import dataclasses
 import time
+import typing
 
 from app.models import (
     Artefact,
@@ -27,8 +29,50 @@ from app.settings import PlumblineConfig
 from core.store import Store
 
 
+def _coerce_tuples(cls, data: dict) -> dict:
+    """Widen a raw Firestore document to what `cls`'s own field annotations
+    promise, for exactly the one place JSON's type system and this
+    codebase's disagree: an array.
+
+    Several models here (`Behaviour.tags`, `Patch.files`, and others)
+    annotate an array field `tuple[...]` rather than `list[...]`, on
+    purpose -- several of these dataclasses are frozen and hashed
+    elsewhere (see `Route`'s own module comment), and a `list` field
+    would break that the moment anything hashes the instance. Firestore
+    itself has no tuple type: `google-cloud-firestore`'s real client
+    decodes every JSON array it reads back as a plain `list`, regardless
+    of what was written, so `cls(**data)` on a real document would
+    silently build a dataclass whose `tags`/`files` field holds a `list`
+    where its own type annotation promises a `tuple`.
+
+    The offline suite never observes this: `core.fakes.FakeFirestore`
+    round-trips through `copy.deepcopy`, which preserves whatever type a
+    test happened to construct the row with -- a tuple stored comes back
+    a tuple, masking exactly the mismatch a real Firestore client
+    produces. This function is what makes both agree, applied inside
+    `_rebuild` below (and, for the same reason, everywhere a query result
+    list is turned back into a dataclass) rather than left for every call
+    site to remember.
+
+    `dataclasses.fields(cls)` plus `typing.get_origin` reads each field's
+    own annotation rather than hardcoding which two fields need this --
+    every current and future `tuple[...]`-annotated field on any model
+    gets the same coercion for free. Only the outer array is widened; a
+    doubly-nested field (`Route.elements: tuple[tuple[str, str, str],
+    ...]`) still leaves its inner arrays as `list`s -- no model in this
+    codebase round-trips one through this path today, and going further
+    would need to walk the annotation's own type args recursively rather
+    than check them once.
+    """
+    coerced = dict(data)
+    for f in dataclasses.fields(cls):
+        if typing.get_origin(f.type) is tuple and isinstance(coerced.get(f.name), list):
+            coerced[f.name] = tuple(coerced[f.name])
+    return coerced
+
+
 def _rebuild(cls, data):
-    return cls(**data) if data else None
+    return cls(**_coerce_tuples(cls, data)) if data else None
 
 
 class Repo:
@@ -294,7 +338,10 @@ class Repo:
         self._store.put("behaviours", b.id, to_dict(b))
 
     def behaviours_for_workspace(self, wid: str) -> list[Behaviour]:
-        return [Behaviour(**r) for r in self._store.query("behaviours", "workspace_id", "==", wid)]
+        return [
+            _rebuild(Behaviour, r)
+            for r in self._store.query("behaviours", "workspace_id", "==", wid)
+        ]
 
     # spec files -------------------------------------------------------
     #

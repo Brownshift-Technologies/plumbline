@@ -1,0 +1,57 @@
+# Plumbline run worker image -- deployed as the Cloud Run Job
+# `plumbline-worker` (see deploy.sh), triggered once per run by
+# `core.events.enqueue_job` (called from `app/run_routes.py` via
+# `app.state.enqueue_job`). One container execution runs exactly one
+# `PLUMBLINE_RUN_ID` to completion and exits -- see `job/worker.py`'s own
+# module docstring for why this is deliberately NOT a long-lived server.
+#
+# Unlike `Dockerfile` (the API image), this image DOES need a real browser:
+# `job/orchestrator.py` drives the fleet's `agents/runner.py`, which drives
+# `agents/browser.py`'s `PlaywrightDriver` against a real target. `playwright
+# install --with-deps chromium` installs both the Chromium binary and its
+# system (apt) dependencies -- skipping `--with-deps` is a common way this
+# fails at runtime instead of at build time, with an opaque "missing shared
+# library" error from inside Chromium's own sandbox startup.
+#
+# `agents/browser.py`'s `PlaywrightDriver.start()` launches with
+# `chromium_sandbox=False` already (see that module) -- required because
+# Cloud Run Jobs run containers without the extra Linux capabilities
+# Chromium's own sandbox needs, not something this Dockerfile has to
+# configure separately.
+#
+# `uv pip install --system -e .` installs from the SAME pinned
+# `pyproject.toml` as `Dockerfile`, including `google-api-core>=2.34.0,<2.35.0`
+# -- see that file's own comment on why this pin must never move.
+
+FROM python:3.13-slim
+WORKDIR /app
+
+COPY pyproject.toml uv.lock* ./
+RUN pip install --no-cache-dir uv \
+ && uv pip install --system -e .
+
+# `playwright install --with-deps chromium` needs the `playwright` Python
+# package already installed (done above) to know which browser build to
+# fetch, and needs root (the default user in this image) to apt-install its
+# system dependencies -- both are already true at this point in the build.
+RUN playwright install --with-deps chromium
+
+# Only what job/worker.py's own import chain reaches (see that module's
+# docstring, and job/orchestrator.py's, for the full list): job itself,
+# plus app/core/gateway/agents. No `seed/` (never imported by this path)
+# and no `web/dist` (this container serves nothing over HTTP).
+COPY app ./app
+COPY core ./core
+COPY gateway ./gateway
+COPY agents ./agents
+COPY job ./job
+
+ENV PLUMBLINE_ENV=production
+
+# `job/worker.py` defines `main()` but deliberately has no
+# `if __name__ == "__main__":` guard of its own (see tests/test_worker.py,
+# which imports the module and calls `worker.main()` directly rather than
+# shelling out to it) -- so the entrypoint calls it explicitly rather than
+# `python3 -m job.worker`, which would import the module and exit having
+# run nothing.
+CMD ["python3", "-c", "from job.worker import main; main()"]
