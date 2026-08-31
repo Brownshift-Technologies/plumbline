@@ -1,13 +1,18 @@
 import { API_BASE, api } from "./api";
-import type { RunDetail, RunStep } from "./types";
+import type { Run, RunDetailResponse, RunStep } from "./types";
 
 export type StreamStatus = "connecting" | "live" | "reconnecting" | "polling" | "closed";
 
 export interface RunStreamHandlers {
   /** Called once per step, in the order the server sends them (replay, then live). */
   onStep: (step: RunStep) => void;
-  /** Called once, when the run reaches a terminal state. */
-  onFinished: (run: RunDetail) => void;
+  /**
+   * Called once, when the run reaches a terminal state. The `finished` SSE
+   * event carries `_run_json(current)` (`app/run_routes.py`) -- a bare
+   * `Run`, with no `steps` or `finding_id` of its own -- so this is a flat
+   * `Run`, not the `{run, steps, finding_id}` shape `GET /runs/{id}` sends.
+   */
+  onFinished: (run: Run) => void;
   onStatusChange?: (status: StreamStatus) => void;
 }
 
@@ -57,12 +62,12 @@ export function connectRunStream(runId: string, handlers: RunStreamHandlers): ()
   function pollOnce() {
     if (closed) return;
     api
-      .get<RunDetail>(`/runs/${runId}`)
-      .then((run) => {
+      .get<RunDetailResponse>(`/runs/${runId}`)
+      .then((data) => {
         if (closed) return;
-        for (const step of run.steps) emitStep(step);
-        if (isTerminal(run.state)) {
-          handlers.onFinished(run);
+        for (const step of data.steps) emitStep(step);
+        if (isTerminal(data.run.state)) {
+          handlers.onFinished(data.run);
           setStatus("closed");
           return;
         }
@@ -114,14 +119,13 @@ export function connectRunStream(runId: string, handlers: RunStreamHandlers): ()
 
     source.addEventListener("finished", (event) => {
       try {
-        const finalRun: RunDetail = JSON.parse((event as MessageEvent).data);
-        // The server may finalise with a step that was never separately
-        // streamed as its own "step" event (e.g. the run finished between
-        // this client's last poll/replay and the terminal event) -- run
-        // the payload's steps through the same dedup path pollOnce() uses,
-        // rather than only trusting `onFinished`'s caller to have already
-        // seen every one of them.
-        for (const step of finalRun.steps ?? []) emitStep(step);
+        // `_run_events` (`app/run_routes.py`) always drains every unsent
+        // step as its own "step" event, in the same generator iteration,
+        // before it ever yields "finished" -- so by construction there is
+        // no step this payload could carry that emitStep hasn't already
+        // seen. The payload itself is a bare `Run` (`_run_json`): no
+        // `steps` field to replay from at all.
+        const finalRun: Run = JSON.parse((event as MessageEvent).data);
         handlers.onFinished(finalRun);
       } catch {
         // fall through; polling/reconnect below still applies if this repeats

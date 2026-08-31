@@ -13,7 +13,7 @@ import { useCurrentUser } from "../lib/useCurrentUser";
 import { isDemoWrite, demoWriteMessage } from "../lib/demo";
 import { greeting, relativeTime, formatDuration } from "../lib/time";
 import { routes } from "../lib/routes";
-import type { Finding, Run, RunListResponse } from "../lib/types";
+import type { Finding, FindingsResponse, Run, RunListResponse } from "../lib/types";
 
 const START_TILES: { key: string; label: string; sub: string; icon: IconName; bg: string; fg: string }[] = [
   { key: "behaviour", label: "Behaviour", sub: "One thing that must hold", icon: "i-checkbox", bg: "var(--brand-w)", fg: "var(--brand)" },
@@ -93,10 +93,13 @@ export function Home() {
   const [demoNotice, setDemoNotice] = useState<string | null>(null);
 
   const attention = useAsync<Finding[]>(
-    () => api.get<Finding[]>("/findings?status=patch_ready"),
+    () => api.get<FindingsResponse>("/findings?status=patch_ready").then((r) => r.findings),
     [],
   );
-  const findings = useAsync<Finding[]>(() => api.get<Finding[]>("/findings?limit=3"), []);
+  const findings = useAsync<Finding[]>(
+    () => api.get<FindingsResponse>("/findings?limit=3").then((r) => r.findings),
+    [],
+  );
   const runs = useAsync<RunListResponse>(() => api.get<RunListResponse>("/runs?limit=4"), []);
 
   async function startRun(trigger: string) {

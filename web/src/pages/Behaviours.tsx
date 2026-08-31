@@ -11,7 +11,7 @@ import { api } from "../lib/api";
 import { useAsync } from "../lib/useAsync";
 import { useCurrentUser } from "../lib/useCurrentUser";
 import { isDemoWrite, demoWriteMessage } from "../lib/demo";
-import type { Behaviour } from "../lib/types";
+import type { Behaviour, BehavioursResponse } from "../lib/types";
 
 interface DraftBehaviour {
   id?: string;
@@ -84,20 +84,20 @@ export function Behaviours() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  const list = useAsync<Behaviour[]>(() => {
+  const list = useAsync<BehavioursResponse>(() => {
     const params = new URLSearchParams();
     if (tag.trim()) params.set("tag", tag.trim());
     if (owner.trim()) params.set("owner", owner.trim());
     const qs = params.toString();
-    return api.get<Behaviour[]>(`/behaviours${qs ? `?${qs}` : ""}`);
+    return api.get<BehavioursResponse>(`/behaviours${qs ? `?${qs}` : ""}`);
   }, [tag, owner]);
 
   const filtersActive = Boolean(tag || owner);
-  const rows = list.status === "success" ? list.data ?? [] : [];
+  const rows = list.status === "success" ? list.data?.behaviours ?? [] : [];
 
   const needsTotal = list.status === "success" && rows.length === 0 && filtersActive;
   const totalQuery = useAsync<Behaviour[]>(
-    () => (needsTotal ? api.get<Behaviour[]>("/behaviours") : Promise.resolve([])),
+    () => (needsTotal ? api.get<BehavioursResponse>("/behaviours").then((r) => r.behaviours) : Promise.resolve([])),
     [needsTotal],
   );
 

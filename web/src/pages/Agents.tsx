@@ -9,7 +9,7 @@ import { api } from "../lib/api";
 import { useAsync } from "../lib/useAsync";
 import { useCurrentUser } from "../lib/useCurrentUser";
 import { isDemoWrite, demoWriteMessage } from "../lib/demo";
-import type { AgentStatus } from "../lib/types";
+import type { AgentsResponse, AgentStatus } from "../lib/types";
 
 const STATE_KIND: Record<string, PillKind> = {
   idle: "grey",
@@ -30,7 +30,7 @@ const LIVE_REFRESH_MS = 5000;
 export function Agents() {
   const { show } = useToast();
   const { data: user } = useCurrentUser();
-  const agents = useAsync<AgentStatus[]>(() => api.get<AgentStatus[]>("/agents"), []);
+  const agents = useAsync<AgentsResponse>(() => api.get<AgentsResponse>("/agents"), []);
 
   useEffect(() => {
     if (agents.status !== "success") return;
@@ -44,7 +44,7 @@ export function Agents() {
   }, [agents.status]);
 
   const canManage = user?.role === "owner";
-  const rows = agents.status === "success" ? agents.data ?? [] : [];
+  const rows = agents.status === "success" ? agents.data?.agents ?? [] : [];
 
   async function pause(name?: string) {
     try {
@@ -71,11 +71,9 @@ export function Agents() {
   }
 
   const columns: TableColumn<AgentStatus>[] = [
-    { key: "name", header: "Agent", label: "Agent", primary: true, width: "150px", render: (a) => <b>{a.name}</b> },
-    { key: "version", header: "Version", label: "Version", width: "70px", render: (a) => <span className="mono" style={{ color: "var(--muted)" }}>{a.version}</span> },
+    { key: "agent", header: "Agent", label: "Agent", primary: true, width: "150px", render: (a) => <b>{a.agent}</b> },
     { key: "tools", header: "Tools it may use", label: "Tools", render: (a) => <span className="mono" style={{ color: "var(--muted)" }}>{a.tools.join(" · ")}</span> },
-    { key: "model", header: "Model", label: "Model", width: "150px", render: (a) => <span className="mono" style={{ color: a.model ? "var(--muted)" : "var(--faint)" }}>{a.model ?? "—"}</span> },
-    { key: "queue", header: "Queue", label: "Queue", width: "78px", render: (a) => <span className="n" style={{ color: "var(--muted)" }}>{a.queue}</span> },
+    { key: "queue_depth", header: "Queue", label: "Queue", width: "78px", render: (a) => <span className="n" style={{ color: "var(--muted)" }}>{a.queue_depth}</span> },
     { key: "state", header: "State", label: "State", width: "118px", render: (a) => <Pill kind={STATE_KIND[a.state] ?? "grey"} dot={false}>{STATE_LABEL[a.state] ?? a.state}</Pill> },
     {
       key: "actions",
@@ -86,7 +84,7 @@ export function Agents() {
         a.state === "paused" ? (
           <Button
             size="sm"
-            onClick={() => resume(a.name)}
+            onClick={() => resume(a.agent)}
             disabled={!canManage}
             title={canManage ? undefined : "Only an owner can resume an agent."}
             aria-describedby={canManage ? undefined : "agent-manage-disabled-reason"}
@@ -96,7 +94,7 @@ export function Agents() {
         ) : (
           <Button
             size="sm"
-            onClick={() => pause(a.name)}
+            onClick={() => pause(a.agent)}
             disabled={!canManage}
             title={canManage ? undefined : "Only an owner can pause an agent."}
             aria-describedby={canManage ? undefined : "agent-manage-disabled-reason"}
@@ -132,7 +130,7 @@ export function Agents() {
       </div>
       <Panel style={{ marginTop: 18 }}>
         {agents.status === "loading" && (
-          <Table columns={columns} rows={[]} getRowKey={(a) => a.name} skeletonRows={5} caption="Loading agents" />
+          <Table columns={columns} rows={[]} getRowKey={(a) => a.agent} skeletonRows={5} caption="Loading agents" />
         )}
         {agents.status === "error" && (
           <EmptyState
@@ -145,7 +143,7 @@ export function Agents() {
         {agents.status === "success" && rows.length === 0 && (
           <EmptyState variant="empty" icon="i-agents" title="No agents registered" description="The fleet hasn't been provisioned for this workspace yet." />
         )}
-        {agents.status === "success" && rows.length > 0 && <Table columns={columns} rows={rows} getRowKey={(a) => a.name} />}
+        {agents.status === "success" && rows.length > 0 && <Table columns={columns} rows={rows} getRowKey={(a) => a.agent} />}
       </Panel>
     </div>
   );

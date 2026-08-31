@@ -71,7 +71,7 @@ test("reconnects with backoff on drop, then falls back to polling after three co
   const onStep = vi.fn();
   const onFinished = vi.fn();
   const onStatusChange = vi.fn();
-  vi.mocked(api.get).mockResolvedValue({ id: "r1", state: "running", steps: [] });
+  vi.mocked(api.get).mockResolvedValue({ run: { id: "r1", state: "running" }, steps: [], finding_id: null });
 
   const dispose = connectRunStream("r1", { onStep, onFinished, onStatusChange });
   expect(FakeEventSource.instances).toHaveLength(1);
@@ -127,22 +127,24 @@ test("disposing the stream tears down the EventSource and stops any pending reco
   expect(FakeEventSource.instances).toHaveLength(1);
 });
 
-test("the finished event's own steps are run through the same dedup path, so a step that only ever appeared in the terminal payload is not dropped", () => {
+test("the finished event carries a bare run with no steps of its own -- every step already arrived as its own \"step\" event first", () => {
   const onStep = vi.fn();
   const onFinished = vi.fn();
   const dispose = connectRunStream("r1", { onStep, onFinished });
 
   const es = FakeEventSource.instances[0];
   es.triggerOpen();
-  const seenStep = { id: "s1", agent: "cartographer", summary: "mapped", detail: "", outcome: "ok", duration_ms: 100, at: 1, run_id: "r1" };
-  const finalOnlyStep = { id: "s2", agent: "surgeon", summary: "opened the pull request", detail: "", outcome: "ok", duration_ms: 50, at: 2, run_id: "r1" };
-  es.emit("step", seenStep);
-  // The server finalises with BOTH steps in its payload -- s1 (already
-  // streamed) and s2 (never sent as its own "step" event).
-  es.emit("finished", { id: "r1", state: "passed", steps: [seenStep, finalOnlyStep] });
+  const step = { id: "s1", agent: "cartographer", summary: "mapped", detail: "", outcome: "ok", duration_ms: 100, at: 1, run_id: "r1" };
+  es.emit("step", step);
+  // `_run_events` (app/run_routes.py) drains every unsent step as its own
+  // "step" event, in the same generator pass, before it ever yields
+  // "finished" -- the finished payload itself is `_run_json(current)`, a
+  // bare Run with no `steps` field to replay from at all.
+  const finalRun = { id: "r1", number: 4471, state: "passed" };
+  es.emit("finished", finalRun);
 
-  expect(onStep).toHaveBeenCalledTimes(2);
-  expect(onStep).toHaveBeenCalledWith(finalOnlyStep);
+  expect(onStep).toHaveBeenCalledTimes(1);
   expect(onFinished).toHaveBeenCalledTimes(1);
+  expect(onFinished).toHaveBeenCalledWith(finalRun);
   dispose();
 });

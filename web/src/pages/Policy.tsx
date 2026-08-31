@@ -6,7 +6,7 @@ import { Table, type TableColumn } from "../components/Table";
 import { api } from "../lib/api";
 import { useAsync } from "../lib/useAsync";
 import { formatClock } from "../lib/time";
-import type { PolicyDecision } from "../lib/types";
+import type { PolicyDecisionEntry, PolicyDecisionsResponse } from "../lib/types";
 
 const DECISION_KIND: Record<string, PillKind> = {
   allowed: "pass",
@@ -21,17 +21,17 @@ const DECISION_LABEL: Record<string, string> = {
 };
 
 export function Policy() {
-  const decisions = useAsync<PolicyDecision[]>(() => api.get<PolicyDecision[]>("/policy/decisions"), []);
+  const decisions = useAsync<PolicyDecisionsResponse>(() => api.get<PolicyDecisionsResponse>("/policy/decisions"), []);
 
-  const rows = decisions.status === "success" ? decisions.data ?? [] : [];
-  const blockedCount = rows.filter((d) => d.decision === "blocked").length;
+  const rows = decisions.status === "success" ? decisions.data?.decisions ?? [] : [];
+  const blockedCount = rows.filter((d) => d.detail.decision === "blocked").length;
 
-  const columns: TableColumn<PolicyDecision>[] = [
-    { key: "time", header: "Time", label: "Time", primary: true, width: "96px", render: (d) => <span className="mono" style={{ color: "var(--muted)" }}>{formatClock(d.time)}</span> },
-    { key: "agent", header: "Agent", label: "Agent", width: "132px", render: (d) => d.agent },
-    { key: "call", header: "Call", label: "Call", render: (d) => <span className="mono" style={{ color: "var(--muted)" }}>{d.call}</span> },
-    { key: "rule", header: "Rule", label: "Rule", width: "190px", render: (d) => <span className="mono" style={{ color: "var(--muted)" }}>{d.rule}</span> },
-    { key: "decision", header: "Decision", label: "Decision", width: "112px", render: (d) => <Pill kind={DECISION_KIND[d.decision] ?? "grey"} dot={false}>{DECISION_LABEL[d.decision] ?? d.decision}</Pill> },
+  const columns: TableColumn<PolicyDecisionEntry>[] = [
+    { key: "at", header: "Time", label: "Time", primary: true, width: "96px", render: (d) => <span className="mono" style={{ color: "var(--muted)" }}>{formatClock(d.at)}</span> },
+    { key: "actor", header: "Agent", label: "Agent", width: "132px", render: (d) => d.actor },
+    { key: "action", header: "Call", label: "Call", render: (d) => <span className="mono" style={{ color: "var(--muted)" }}>{d.action}</span> },
+    { key: "target", header: "Target", label: "Target", width: "190px", render: (d) => <span className="mono" style={{ color: "var(--muted)" }}>{d.detail.target ?? "—"}</span> },
+    { key: "decision", header: "Decision", label: "Decision", width: "112px", render: (d) => <Pill kind={DECISION_KIND[d.detail.decision] ?? "grey"} dot={false}>{DECISION_LABEL[d.detail.decision] ?? d.detail.decision}</Pill> },
   ];
 
   return (
@@ -46,7 +46,7 @@ export function Policy() {
         style={{ marginTop: 18 }}
       >
         {decisions.status === "loading" && (
-          <Table columns={columns} rows={[]} getRowKey={(d) => `${d.time}-${d.agent}`} skeletonRows={5} caption="Loading gate decisions" />
+          <Table columns={columns} rows={[]} getRowKey={(d) => `${d.seq}`} skeletonRows={5} caption="Loading gate decisions" />
         )}
         {decisions.status === "error" && (
           <EmptyState
@@ -60,7 +60,7 @@ export function Policy() {
           <EmptyState variant="empty" icon="i-shield" title="No gate decisions yet" description="Nothing has hit a policy gate today." />
         )}
         {decisions.status === "success" && rows.length > 0 && (
-          <Table columns={columns} rows={rows} getRowKey={(d) => `${d.time}-${d.agent}-${d.call}`} />
+          <Table columns={columns} rows={rows} getRowKey={(d) => `${d.seq}`} />
         )}
       </Panel>
     </div>

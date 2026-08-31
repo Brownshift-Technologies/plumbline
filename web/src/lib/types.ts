@@ -58,9 +58,19 @@ export interface RunStep {
   at: number;
 }
 
-export interface RunDetail extends Run {
+/**
+ * `GET /api/runs/{id}`'s actual shape (`app/run_routes.py`'s `get_run`) --
+ * the run itself nested under `run`, sitting alongside `steps` and
+ * `finding_id` as siblings, NOT a flat merge of `Run`'s fields with `steps`
+ * tacked on. That flat shape is what a *`finished` SSE event* carries
+ * instead (`_run_json(current)`, a bare `Run` with no `steps`/`finding_id`
+ * at all) -- two different payloads for two different transports; see
+ * `lib/sse.ts`.
+ */
+export interface RunDetailResponse {
+  run: Run;
   steps: RunStep[];
-  finding_id?: string | null;
+  finding_id: string | null;
 }
 
 export interface RunListResponse {
@@ -81,6 +91,12 @@ export interface Finding {
   repro_count: number;
   at: number;
   run_id?: string | null;
+}
+
+/** `GET /api/findings` (`app/finding_routes.py`'s `list_findings`) wraps the list. */
+export interface FindingsResponse {
+  findings: Finding[];
+  total: number;
 }
 
 export interface Patch {
@@ -107,6 +123,12 @@ export interface Behaviour {
   status: string;
 }
 
+/** `GET /api/behaviours` (`app/behaviour_routes.py`'s `list_behaviours`) wraps the list. */
+export interface BehavioursResponse {
+  behaviours: Behaviour[];
+  total: number;
+}
+
 export interface RouteCoverage {
   id: string;
   path: string;
@@ -114,30 +136,61 @@ export interface RouteCoverage {
   last_mapped: number;
 }
 
-export interface SurfaceSummary {
+/**
+ * `GET /api/surface` (`app/surface_routes.py`'s `get_surface`) -- the real
+ * response is `{routes, total, uncovered}`. It has never sent
+ * `fully_covered`, `partly_covered` or `mapped_at`; `Surface.tsx` derives
+ * those from `routes` itself rather than trusting fields the server does
+ * not send.
+ */
+export interface SurfaceResponse {
   routes: RouteCoverage[];
-  fully_covered: number;
-  partly_covered: number;
+  total: number;
   uncovered: number;
-  mapped_at: number;
 }
 
+/**
+ * One entry of `GET /api/agents`'s `agents` array
+ * (`app/agent_routes.py`'s `_agent_status`). The real fields are `agent`,
+ * `tools`, `queue_depth` and `state` -- there is no per-agent `version` or
+ * `model` anywhere in the backend.
+ */
 export interface AgentStatus {
-  name: string;
-  version: string;
+  agent: string;
   tools: string[];
-  model: string | null;
-  queue: number;
+  queue_depth: number;
   state: "idle" | "working" | "gated" | "paused" | string;
 }
 
-export interface PolicyDecision {
-  time: number;
-  agent: string;
-  call: string;
-  target: string;
-  rule: string;
-  decision: "allowed" | "blocked" | "redacted" | string;
+/** `GET /api/agents` (`app/agent_routes.py`'s `list_agents`) wraps the list. */
+export interface AgentsResponse {
+  agents: AgentStatus[];
+  paused: boolean;
+}
+
+/**
+ * One entry of `GET /api/policy/decisions`'s `decisions` array
+ * (`app/agent_routes.py`'s `list_policy_decisions`) -- a raw ledger entry
+ * (see `LedgerEntry`), not a bespoke shape: `actor` is the agent, `action`
+ * is the tool call, and the decision itself lives in `detail`.
+ */
+export interface PolicyDecisionEntry {
+  seq: number;
+  at: number;
+  actor: string;
+  action: string;
+  detail: {
+    decision: "allowed" | "blocked" | "redacted" | string;
+    reason?: string;
+    target?: string;
+    policy_version?: number;
+  };
+  signature: string;
+}
+
+/** `GET /api/policy/decisions` wraps the list. */
+export interface PolicyDecisionsResponse {
+  decisions: PolicyDecisionEntry[];
 }
 
 export interface PolicyRule {
@@ -147,8 +200,12 @@ export interface PolicyRule {
   effect: "human" | "deny" | "allow";
 }
 
+/**
+ * `GET`/`PUT /api/policy/rules` (`app/agent_routes.py`) -- the version
+ * field is named `policy_version`, not `version`.
+ */
 export interface PolicyRulesResponse {
-  version: number;
+  policy_version: number;
   rules: PolicyRule[];
 }
 
@@ -164,6 +221,7 @@ export interface LedgerEntry {
 export interface LedgerListResponse {
   entries: LedgerEntry[];
   next_cursor: string | null;
+  total: number;
 }
 
 export interface LedgerVerifyResponse {

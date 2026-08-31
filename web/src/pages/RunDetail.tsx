@@ -15,7 +15,7 @@ import { connectRunStream, type StreamStatus } from "../lib/sse";
 import { isDemoWrite, demoWriteMessage } from "../lib/demo";
 import { formatClock, formatDuration, relativeTime } from "../lib/time";
 import { routes } from "../lib/routes";
-import type { Finding, Patch, RunDetail as RunDetailData, RunStep } from "../lib/types";
+import type { Finding, Patch, Run, RunDetailResponse, RunStep } from "../lib/types";
 
 const RESULT_KIND: Record<string, PillKind> = {
   passed: "pass",
@@ -26,7 +26,7 @@ const RESULT_KIND: Record<string, PillKind> = {
   running: "info",
 };
 
-function resultLabel(run: RunDetailData): string {
+function resultLabel(run: Run): string {
   if (run.state === "failed") return `${run.failed} failing`;
   if (run.state === "unstable") return `${run.failed} unstable`;
   if (run.state === "cancelled") return "Cancelled";
@@ -35,7 +35,7 @@ function resultLabel(run: RunDetailData): string {
   return "All held";
 }
 
-function behaviourSummary(run: RunDetailData): string {
+function behaviourSummary(run: Run): string {
   const parts = [`${run.held} held`];
   if (run.failed) parts.push(`${run.failed} failed`);
   if (run.repaired) parts.push(`${run.repaired} repaired`);
@@ -77,10 +77,10 @@ export function RunDetail() {
   const { show } = useToast();
   const { data: user } = useCurrentUser();
 
-  const runQuery = useAsync<RunDetailData>(() => api.get<RunDetailData>(`/runs/${runId}`), [runId]);
+  const runQuery = useAsync<RunDetailResponse>(() => api.get<RunDetailResponse>(`/runs/${runId}`), [runId]);
 
   const [steps, setSteps] = useState<RunStep[]>([]);
-  const [finalRun, setFinalRun] = useState<RunDetailData | null>(null);
+  const [finalRun, setFinalRun] = useState<Run | null>(null);
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("connecting");
   const [lastAnnouncedStep, setLastAnnouncedStep] = useState<string>("");
   const seenStepIds = useRef<Set<string>>(new Set());
@@ -112,8 +112,13 @@ export function RunDetail() {
     });
   }, [runId]);
 
-  const run = finalRun ?? runQuery.data;
-  const findingId = run?.finding_id ?? null;
+  const run = finalRun ?? runQuery.data?.run ?? null;
+  // `finding_id` is a sibling of `run` in the `GET /runs/{id}` envelope,
+  // not a field on the run itself -- and the "finished" SSE event (what
+  // populates `finalRun`) never carries it at all (see lib/sse.ts), so
+  // this always reads off the initial fetch, independent of whichever
+  // source `run` above is currently drawing from.
+  const findingId = runQuery.data?.finding_id ?? null;
 
   const findingQuery = useAsync<Finding | null>(
     () => (findingId ? api.get<Finding>(`/findings/${findingId}`) : Promise.resolve(null)),

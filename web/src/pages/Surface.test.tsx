@@ -38,7 +38,7 @@ test("shows a real reason and a next action when nothing has been mapped", async
   vi.mocked(fetch).mockImplementation((input) =>
     String(input).includes("/auth/me")
       ? jsonResponse(200, { id: "u1", name: "Roger", is_demo: false, workspace_id: "ws1", role: "owner" })
-      : jsonResponse(200, { routes: [], fully_covered: 0, partly_covered: 0, uncovered: 0, mapped_at: Date.now() / 1000 }),
+      : jsonResponse(200, { routes: [], total: 0, uncovered: 0 }),
   );
   renderSurface();
   expect(await screen.findByText("No routes mapped yet")).toBeInTheDocument();
@@ -62,10 +62,8 @@ test("the missing-routes button is disabled once every route is covered", async 
       ? jsonResponse(200, { id: "u1", name: "Roger", is_demo: false, workspace_id: "ws1", role: "owner" })
       : jsonResponse(200, {
           routes: [{ id: "r1", path: "/", coverage_pct: 100, last_mapped: Date.now() / 1000 }],
-          fully_covered: 1,
-          partly_covered: 0,
+          total: 1,
           uncovered: 0,
-          mapped_at: Date.now() / 1000,
         }),
   );
   renderSurface();

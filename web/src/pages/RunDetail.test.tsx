@@ -88,18 +88,20 @@ test("a gated run reads as gated, not failed -- the product's core distinction",
       });
     }
     return jsonResponse(200, {
-      id: "run_1",
-      workspace_id: "ws1",
-      number: 4471,
-      trigger: "Pull request #2211",
-      state: "failed",
-      commit: "8f21c04",
-      started_by: "Surgeon",
-      held: 341,
-      failed: 1,
-      repaired: 0,
-      duration_ms: 401000,
-      started_at: Date.now() / 1000,
+      run: {
+        id: "run_1",
+        workspace_id: "ws1",
+        number: 4471,
+        trigger: "Pull request #2211",
+        state: "failed",
+        commit: "8f21c04",
+        started_by: "Surgeon",
+        held: 341,
+        failed: 1,
+        repaired: 0,
+        duration_ms: 401000,
+        started_at: Date.now() / 1000,
+      },
       finding_id: "f1",
       steps: [
         { id: "s1", run_id: "run_1", agent: "surgeon", summary: "opened the pull request and stopped", detail: "Policy requires a human.", outcome: "gated", duration_ms: 1000, at: Date.now() / 1000 },
@@ -147,18 +149,20 @@ test("Approve is disabled with a visible explanation for a role that cannot appr
       });
     }
     return jsonResponse(200, {
-      id: "run_1",
-      workspace_id: "ws1",
-      number: 4471,
-      trigger: "Pull request #2211",
-      state: "failed",
-      commit: "8f21c04",
-      started_by: "Surgeon",
-      held: 341,
-      failed: 1,
-      repaired: 0,
-      duration_ms: 401000,
-      started_at: Date.now() / 1000,
+      run: {
+        id: "run_1",
+        workspace_id: "ws1",
+        number: 4471,
+        trigger: "Pull request #2211",
+        state: "failed",
+        commit: "8f21c04",
+        started_by: "Surgeon",
+        held: 341,
+        failed: 1,
+        repaired: 0,
+        duration_ms: 401000,
+        started_at: Date.now() / 1000,
+      },
       finding_id: "f1",
       steps: [
         { id: "s1", run_id: "run_1", agent: "surgeon", summary: "opened the pull request and stopped", detail: "", outcome: "gated", duration_ms: 1000, at: Date.now() / 1000 },
@@ -213,18 +217,20 @@ test("a demo session approving the gated payments patch is told nothing was save
       });
     }
     return jsonResponse(200, {
-      id: "run_2",
-      workspace_id: "ws1",
-      number: 10,
-      trigger: "Pull request #2299",
-      state: "failed",
-      commit: "abc1234",
-      started_by: "Surgeon",
-      held: 341,
-      failed: 1,
-      repaired: 0,
-      duration_ms: 5000,
-      started_at: Date.now() / 1000,
+      run: {
+        id: "run_2",
+        workspace_id: "ws1",
+        number: 10,
+        trigger: "Pull request #2299",
+        state: "failed",
+        commit: "abc1234",
+        started_by: "Surgeon",
+        held: 341,
+        failed: 1,
+        repaired: 0,
+        duration_ms: 5000,
+        started_at: Date.now() / 1000,
+      },
       finding_id: "f1",
       steps: [
         { id: "s1", run_id: "run_2", agent: "surgeon", summary: "opened the pull request and stopped", detail: "", outcome: "gated", duration_ms: 1000, at: Date.now() / 1000 },
@@ -259,8 +265,10 @@ const GATED_FIXTURE_HANDLERS = (extra: Record<string, unknown> = {}) => (input: 
     });
   }
   return jsonResponse(200, {
-    id: "run_3", workspace_id: "ws1", number: 20, trigger: "Manual", state: "failed", commit: "c1",
-    started_by: "Runner", held: 5, failed: 1, repaired: 0, duration_ms: 1000, started_at: Date.now() / 1000,
+    run: {
+      id: "run_3", workspace_id: "ws1", number: 20, trigger: "Manual", state: "failed", commit: "c1",
+      started_by: "Runner", held: 5, failed: 1, repaired: 0, duration_ms: 1000, started_at: Date.now() / 1000,
+    },
     finding_id: "f1", steps: [],
   });
 };

@@ -44,7 +44,7 @@ test("shows shaped skeleton rows while loading, not a spinner over a blank page"
 
 test("a fresh workspace with no behaviours gets a distinct empty state from a filtered one", async () => {
   vi.mocked(fetch).mockImplementation((input) =>
-    String(input).includes("/auth/me") ? jsonResponse(200, ME_OWNER) : jsonResponse(200, []),
+    String(input).includes("/auth/me") ? jsonResponse(200, ME_OWNER) : jsonResponse(200, { behaviours: [], total: 0 }),
   );
   renderBehaviours();
   expect(await screen.findByText("No behaviours yet")).toBeInTheDocument();
@@ -64,8 +64,8 @@ test("filtering to nothing gives the real reason -- a count and what doesn't mat
   vi.mocked(fetch).mockImplementation((input) => {
     const url = String(input);
     if (url.includes("/auth/me")) return jsonResponse(200, ME_OWNER);
-    if (url.includes("tag=payments")) return jsonResponse(200, []);
-    return jsonResponse(200, Array.from({ length: 342 }, (_, i) => makeBehaviour(`b${i}`)));
+    if (url.includes("tag=payments")) return jsonResponse(200, { behaviours: [], total: 0 });
+    return jsonResponse(200, { behaviours: Array.from({ length: 342 }, (_, i) => makeBehaviour(`b${i}`)), total: 342 });
   });
   renderBehaviours();
 
@@ -81,7 +81,7 @@ test("delete is disabled with an explanation for a role below owner", async () =
   vi.mocked(fetch).mockImplementation((input) => {
     const url = String(input);
     if (url.includes("/auth/me")) return jsonResponse(200, { ...ME_OWNER, role: "approver" });
-    return jsonResponse(200, [makeBehaviour("b1")]);
+    return jsonResponse(200, { behaviours: [makeBehaviour("b1")], total: 1 });
   });
   renderBehaviours();
 
@@ -96,7 +96,7 @@ test("a demo session creating a behaviour is told nothing was saved, not given t
     const url = String(input);
     if (url.includes("/auth/me")) return jsonResponse(200, { ...ME_OWNER, is_demo: true });
     if (init?.method === "POST") return jsonResponse(200, { demo: true, persisted: false });
-    return jsonResponse(200, []);
+    return jsonResponse(200, { behaviours: [], total: 0 });
   });
   renderBehaviours();
 

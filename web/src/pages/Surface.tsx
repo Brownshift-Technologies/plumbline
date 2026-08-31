@@ -10,7 +10,7 @@ import { useAsync } from "../lib/useAsync";
 import { useCurrentUser } from "../lib/useCurrentUser";
 import { isDemoWrite, demoWriteMessage } from "../lib/demo";
 import { routes } from "../lib/routes";
-import type { SurfaceSummary } from "../lib/types";
+import type { SurfaceResponse } from "../lib/types";
 
 function coverageColor(pct: number): string {
   if (pct === 0) return "var(--fail)";
@@ -22,7 +22,7 @@ export function Surface() {
   const navigate = useNavigate();
   const { show } = useToast();
   const { data: user } = useCurrentUser();
-  const surface = useAsync<SurfaceSummary>(() => api.get<SurfaceSummary>("/surface"), []);
+  const surface = useAsync<SurfaceResponse>(() => api.get<SurfaceResponse>("/surface"), []);
 
   const canRemap = user?.role === "owner" || user?.role === "approver";
   const uncovered = surface.status === "success" ? surface.data?.routes.filter((r) => r.coverage_pct === 0) ?? [] : [];
@@ -89,6 +89,13 @@ export function Surface() {
   }
 
   const data = surface.data;
+  // The server sends only `routes`, `total` and `uncovered` (a count) --
+  // "fully covered" / "partly covered" and a last-mapped timestamp are not
+  // fields it returns, so they are derived here from `routes` itself
+  // rather than trusted off a response shape the backend never sent.
+  const fullyCovered = data?.routes.filter((r) => r.coverage_pct === 100).length ?? 0;
+  const partlyCovered = data?.routes.filter((r) => r.coverage_pct > 0 && r.coverage_pct < 100).length ?? 0;
+  const mappedAt = data && data.routes.length > 0 ? Math.max(...data.routes.map((r) => r.last_mapped)) : null;
   if (!data || data.routes.length === 0) {
     return (
       <div className="body">
@@ -115,7 +122,7 @@ export function Surface() {
         <div>
           <h1>Surface map</h1>
           <p>
-            {data.routes.length} routes found. {data.fully_covered + data.partly_covered} have at least one behaviour
+            {data.routes.length} routes found. {fullyCovered + partlyCovered} have at least one behaviour
             written against them.
           </p>
         </div>
@@ -143,7 +150,7 @@ export function Surface() {
         {uncovered.length === 0 && <span id="write-missing-disabled-reason" className="visually-hidden">Every route already has a behaviour.</span>}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 330px", gap: 14, marginTop: 18 }}>
-        <Panel title="Routes by coverage" headerExtra={<span style={{ fontSize: 13, color: "var(--faint)" }}>Mapped {new Date(data.mapped_at * 1000).toLocaleString()}</span>}>
+        <Panel title="Routes by coverage" headerExtra={mappedAt !== null && <span style={{ fontSize: 13, color: "var(--faint)" }}>Mapped {new Date(mappedAt * 1000).toLocaleString()}</span>}>
           <div style={{ padding: "6px 16px 14px" }}>
             {[...data.routes].sort((a, b) => a.coverage_pct - b.coverage_pct).map((r) => {
               const color = coverageColor(r.coverage_pct);
@@ -165,11 +172,11 @@ export function Surface() {
         <Panel title="Summary">
           <div style={{ padding: "14px 16px", display: "grid", gap: 12 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <Pill kind="pass" dot={false}>{data.fully_covered}</Pill>
+              <Pill kind="pass" dot={false}>{fullyCovered}</Pill>
               <span style={{ fontSize: 14 }}>Fully covered</span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <Pill kind="warn" dot={false}>{data.partly_covered}</Pill>
+              <Pill kind="warn" dot={false}>{partlyCovered}</Pill>
               <span style={{ fontSize: 14 }}>Partly covered</span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>

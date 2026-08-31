@@ -36,7 +36,7 @@ test("shows shaped skeleton rows, not a spinner over a blank page", () => {
 });
 
 test("shows a real reason and a next action when there are no open findings", async () => {
-  vi.mocked(fetch).mockImplementation(() => jsonResponse(200, []));
+  vi.mocked(fetch).mockImplementation(() => jsonResponse(200, { findings: [], total: 0 }));
   renderFindings();
   expect(await screen.findByText("No open findings")).toBeInTheDocument();
   expect(screen.getByText("Nothing is currently failing.")).toBeInTheDocument();
@@ -52,9 +52,12 @@ test("shows what failed and a retry", async () => {
 
 test("status is shown as a pill with a human label, not the raw status code", async () => {
   vi.mocked(fetch).mockImplementation(() =>
-    jsonResponse(200, [
-      { id: "f1", workspace_id: "ws1", title: "A retried payment charges the customer twice", route: "/checkout/payment", found_by: "Chaos", status: "patch_ready", severity: "high", seed: "0x1", repro_count: 5, at: Date.now() / 1000 },
-    ]),
+    jsonResponse(200, {
+      findings: [
+        { id: "f1", workspace_id: "ws1", title: "A retried payment charges the customer twice", route: "/checkout/payment", found_by: "Chaos", status: "patch_ready", severity: "high", seed: "0x1", repro_count: 5, at: Date.now() / 1000 },
+      ],
+      total: 1,
+    }),
   );
   renderFindings();
   expect(await screen.findByText("Patch ready")).toBeInTheDocument();
@@ -63,9 +66,19 @@ test("status is shown as a pill with a human label, not the raw status code", as
 
 test("filtering to nothing gives a distinct empty state from a genuinely empty workspace, with a clear-filters action", async () => {
   const user = (await import("@testing-library/user-event")).default.setup();
-  vi.mocked(fetch).mockImplementation((input) => jsonResponse(200, String(input).includes("status=tolerance") ? [] : [
-    { id: "f1", workspace_id: "ws1", title: "x", route: "/x", found_by: "Chaos", status: "triaged", severity: "high", seed: "", repro_count: 1, at: Date.now() / 1000 },
-  ]));
+  vi.mocked(fetch).mockImplementation((input) =>
+    jsonResponse(
+      200,
+      String(input).includes("status=tolerance")
+        ? { findings: [], total: 0 }
+        : {
+            findings: [
+              { id: "f1", workspace_id: "ws1", title: "x", route: "/x", found_by: "Chaos", status: "triaged", severity: "high", seed: "", repro_count: 1, at: Date.now() / 1000 },
+            ],
+            total: 1,
+          },
+    ),
+  );
   renderFindings();
   await screen.findByText("x");
 

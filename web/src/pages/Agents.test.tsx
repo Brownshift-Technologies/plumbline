@@ -16,7 +16,7 @@ function renderAgents() {
 }
 
 const OWNER = { id: "u1", name: "Roger", is_demo: false, workspace_id: "ws1", role: "owner" };
-const AGENT = { name: "Cartographer", version: "2.4.1", tools: ["browser.read"], model: "gemini-3.5-flash", queue: 0, state: "idle" };
+const AGENT = { agent: "Cartographer", tools: ["browser.read"], queue_depth: 0, state: "idle" };
 
 beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn());
@@ -38,7 +38,7 @@ test("shows shaped skeleton rows while loading, not a spinner over a blank page"
 
 test("shows a real reason when no agents are registered", async () => {
   vi.mocked(fetch).mockImplementation((input) =>
-    String(input).includes("/auth/me") ? jsonResponse(200, OWNER) : jsonResponse(200, []),
+    String(input).includes("/auth/me") ? jsonResponse(200, OWNER) : jsonResponse(200, { agents: [], paused: false }),
   );
   renderAgents();
   expect(await screen.findByText("No agents registered")).toBeInTheDocument();
@@ -57,7 +57,7 @@ test("pause is disabled with an explanation for a non-owner, reachable by assist
   vi.mocked(fetch).mockImplementation((input) => {
     const url = String(input);
     if (url.includes("/auth/me")) return jsonResponse(200, { ...OWNER, role: "approver" });
-    return jsonResponse(200, [AGENT]);
+    return jsonResponse(200, { agents: [AGENT], paused: false });
   });
   renderAgents();
   const pauseAll = await screen.findByRole("button", { name: "Pause all" });
@@ -75,7 +75,7 @@ test("the 5s live-refresh keeps existing rows on screen instead of unmounting th
     const url = String(input);
     if (url.includes("/auth/me")) return jsonResponse(200, OWNER);
     queue += 1;
-    return jsonResponse(200, [{ ...AGENT, queue }]);
+    return jsonResponse(200, { agents: [{ ...AGENT, queue_depth: queue }], paused: false });
   });
   renderAgents();
 

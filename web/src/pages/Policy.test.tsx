@@ -33,7 +33,7 @@ test("shows shaped skeleton rows while loading, not a spinner over a blank page"
 });
 
 test("shows a real reason when nothing has hit a gate yet", async () => {
-  vi.mocked(fetch).mockImplementation(() => jsonResponse(200, []));
+  vi.mocked(fetch).mockImplementation(() => jsonResponse(200, { decisions: [] }));
   renderPolicy();
   expect(await screen.findByText("No gate decisions yet")).toBeInTheDocument();
 });
@@ -45,14 +45,23 @@ test("shows what failed and a retry", async () => {
   expect(screen.getByText("the policy log is unavailable")).toBeInTheDocument();
 });
 
-test("a decision shows a human label and the rule that produced it, not a raw status", async () => {
+test("a decision shows a human label and the target it acted on, not a raw status", async () => {
   vi.mocked(fetch).mockImplementation(() =>
-    jsonResponse(200, [
-      { time: Date.now() / 1000, agent: "Surgeon", call: "pr.merge storefront#2211", target: "src/checkout/payment-client.ts", rule: "payments/* -> human", decision: "blocked" },
-    ]),
+    jsonResponse(200, {
+      decisions: [
+        {
+          seq: 1,
+          at: Date.now() / 1000,
+          actor: "Surgeon",
+          action: "pr.merge storefront#2211",
+          detail: { decision: "blocked", target: "src/checkout/payment-client.ts", reason: "payments/* -> human", policy_version: 14 },
+          signature: "sig1",
+        },
+      ],
+    }),
   );
   renderPolicy();
   expect(await screen.findByText("Blocked")).toBeInTheDocument();
-  expect(screen.getByText("payments/* -> human")).toBeInTheDocument();
+  expect(screen.getByText("src/checkout/payment-client.ts")).toBeInTheDocument();
   expect(screen.queryByText("blocked")).not.toBeInTheDocument();
 });

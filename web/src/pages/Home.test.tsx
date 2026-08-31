@@ -50,8 +50,8 @@ test("shows a real reason and a next action when there are no runs yet", async (
   vi.mocked(fetch).mockImplementation((input) => {
     const url = String(input);
     if (routeFor(url) === "runs") return jsonResponse(200, { runs: [], next_cursor: null, total: 0 });
-    if (routeFor(url) === "attention") return jsonResponse(200, []);
-    if (routeFor(url) === "findings") return jsonResponse(200, []);
+    if (routeFor(url) === "attention") return jsonResponse(200, { findings: [], total: 0 });
+    if (routeFor(url) === "findings") return jsonResponse(200, { findings: [], total: 0 });
     return jsonResponse(200, { is_demo: false, id: "u1", name: "Roger", role: "owner", workspace_id: "ws1" });
   });
   render(
@@ -70,8 +70,8 @@ test("shows what failed and a retry when loading recent runs fails", async () =>
   vi.mocked(fetch).mockImplementation((input) => {
     const url = String(input);
     if (routeFor(url) === "runs") return jsonResponse(500, { message: "the run index is unavailable" });
-    if (routeFor(url) === "attention") return jsonResponse(200, []);
-    if (routeFor(url) === "findings") return jsonResponse(200, []);
+    if (routeFor(url) === "attention") return jsonResponse(200, { findings: [], total: 0 });
+    if (routeFor(url) === "findings") return jsonResponse(200, { findings: [], total: 0 });
     return jsonResponse(200, { is_demo: false, id: "u1", name: "Roger", role: "owner", workspace_id: "ws1" });
   });
   render(
@@ -89,7 +89,7 @@ test("findings section shows what failed and a retry, not silently disappearing"
   vi.mocked(fetch).mockImplementation((input) => {
     const url = String(input);
     if (routeFor(url) === "runs") return jsonResponse(200, { runs: [], next_cursor: null, total: 0 });
-    if (routeFor(url) === "attention") return jsonResponse(200, []);
+    if (routeFor(url) === "attention") return jsonResponse(200, { findings: [], total: 0 });
     if (routeFor(url) === "findings") return jsonResponse(500, { message: "the finding index is unavailable" });
     return jsonResponse(200, { is_demo: false, id: "u1", name: "Roger", role: "owner", workspace_id: "ws1" });
   });
@@ -108,8 +108,8 @@ test("findings section shows a real reason when there are none, rather than an e
   vi.mocked(fetch).mockImplementation((input) => {
     const url = String(input);
     if (routeFor(url) === "runs") return jsonResponse(200, { runs: [], next_cursor: null, total: 0 });
-    if (routeFor(url) === "attention") return jsonResponse(200, []);
-    if (routeFor(url) === "findings") return jsonResponse(200, []);
+    if (routeFor(url) === "attention") return jsonResponse(200, { findings: [], total: 0 });
+    if (routeFor(url) === "findings") return jsonResponse(200, { findings: [], total: 0 });
     return jsonResponse(200, { is_demo: false, id: "u1", name: "Roger", role: "owner", workspace_id: "ws1" });
   });
   render(

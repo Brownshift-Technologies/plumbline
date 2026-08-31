@@ -11,7 +11,7 @@ import { api } from "../lib/api";
 import { useAsync } from "../lib/useAsync";
 import { relativeTime } from "../lib/time";
 import { routes } from "../lib/routes";
-import type { Finding } from "../lib/types";
+import type { Finding, FindingsResponse } from "../lib/types";
 
 const STATUS_KIND: Record<string, PillKind> = {
   patch_ready: "info",
@@ -46,16 +46,16 @@ export function Findings() {
   const [foundBy, setFoundBy] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
 
-  const findings = useAsync<Finding[]>(() => {
+  const findings = useAsync<FindingsResponse>(() => {
     const params = new URLSearchParams();
     if (status) params.set("status", status);
     if (route.trim()) params.set("route", route.trim());
     if (foundBy.trim()) params.set("found_by", foundBy.trim());
     const qs = params.toString();
-    return api.get<Finding[]>(`/findings${qs ? `?${qs}` : ""}`);
+    return api.get<FindingsResponse>(`/findings${qs ? `?${qs}` : ""}`);
   }, [status, route, foundBy]);
 
-  const rows = findings.status === "success" ? findings.data ?? [] : [];
+  const rows = findings.status === "success" ? findings.data?.findings ?? [] : [];
   const filtersActive = Boolean(status || route || foundBy);
 
   const columns: TableColumn<Finding>[] = [
