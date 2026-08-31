@@ -203,3 +203,35 @@ def test_snoozing_a_finding(client_as_owner, repo):
     assert r.status_code == 200
     found = next(f for f in repo.findings_for_workspace("ws1") if f.id == "f-snooze")
     assert found.status == "snoozed"
+
+
+def test_a_serialised_finding_carries_its_run_id_so_the_row_is_clickable(client_as_owner, repo):
+    """Findings.tsx opens a finding with `if (f.run_id) navigate(routes.run(f.run_id))`.
+
+    `_finding_json` omitted `run_id` entirely, so the key was always
+    `undefined` client-side and that branch never fired: every row on the
+    Findings screen was silently unclickable, on real fleet output and
+    seeded demo data alike. The model carried the field and
+    `agents/triager.py` set it; only the serialiser dropped it.
+
+    Asserted both ways round -- a finding with a run exposes it, and one
+    without still exposes the key rather than omitting it, because the
+    frontend distinguishes "no run" from "field missing" only by the
+    falsy check above.
+    """
+    repo.put_finding(Finding(
+        id="f-linked", workspace_id="ws1", title="A retried payment charges the customer twice",
+        route="/checkout/payment", found_by="chaos", status="patch_ready", run_id="run-77",
+    ))
+    _make_finding(repo, fid="f-unlinked", title="No run produced this", route="/x")
+
+    body = client_as_owner.get("/api/findings").json()
+    by_id = {f["id"]: f for f in body["findings"]}
+
+    assert "run_id" in by_id["f-linked"], "the serialiser dropped run_id"
+    assert by_id["f-linked"]["run_id"] == "run-77"
+    assert "run_id" in by_id["f-unlinked"], "the key must be present even when empty"
+    assert not by_id["f-unlinked"]["run_id"]
+
+    # And the single-finding endpoint shares the same serialiser.
+    assert client_as_owner.get("/api/findings/f-linked").json()["run_id"] == "run-77"

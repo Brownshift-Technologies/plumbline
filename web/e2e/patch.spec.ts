@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { signInWithPassword } from "./helpers";
+import { signInWithPassword, openLiveDemo } from "./helpers";
 
 const OWNER_EMAIL = "owner@e2e.example.com";
 const OWNER_PASSWORD = "owner-e2e-passphrase";
@@ -39,14 +39,13 @@ test.describe("the approval gate", () => {
    * or real fleet output alike -- `grep -rn "Approve and merge" web/src`
    * finds exactly one render site, and it never renders.
    *
-   * This is deliberately left as `test.fixme`, not deleted and not
-   * loosened to check something the bug doesn't affect -- see task-17f's
-   * brief. The body below is the real test: flip `test.fixme` to `test`
-   * once a run response (REST or SSE) carries `finding_id` (or a
-   * `Finding` carries `run_id` and RunDetail is wired to use it) and this
-   * should pass unmodified.
+   * RESOLVED. `app/models.py`'s `Finding` now carries `run_id`, the run
+   * response carries `finding_id`, and `_finding_json` actually serialises
+   * `run_id` (it did not, which kept every Findings row unclickable long
+   * after the model gained the field). The Approve button is reachable,
+   * so this runs unmodified, exactly as the note above promised.
    */
-  test.fixme(
+  test(
     "a reader sees Approve disabled with a visible reason; an owner sees it enabled and can approve",
     async ({ page, browser }) => {
       // -- reader: disabled, with an explanation in the page, not a tooltip --
@@ -73,4 +72,46 @@ test.describe("the approval gate", () => {
       await ownerContext.close();
     },
   );
+});
+
+test.describe("the demo's hero moment", () => {
+  test("a demo visitor can actually approve the gated patch", async ({ page }) => {
+    // The seam this exists to hold shut. app/finding_routes.py's
+    // _check_approve_permission returns early for `sess.is_demo` and says
+    // why in a comment: "approving the gated patch is the demo's own hero
+    // moment, and a demo session is the sole, de-facto owner of its own
+    // sandbox workspace". The API honours that.
+    //
+    // RunDetail.tsx did not. It disabled Approve whenever
+    // `user.role === "reader"`, and /api/auth/me reports exactly that for
+    // a demo session (it holds no Membership row, so there is no truer
+    // role to report). Backend and frontend were each self-consistent and
+    // said opposite things, so the button the whole demo builds toward
+    // read "Readers cannot approve a patch. Ask an owner or approver."
+    await openLiveDemo(page);
+
+    // Straight to the gated run, via the id the sandbox itself reports --
+    // seed/demo.py names it run_demo_<workspace>_4471 and the workspace id
+    // is fresh per demo session, so it cannot be hard-coded here.
+    // Fetched from inside the page, not via page.request: the demo session
+    // cookie lives in the browser context, and page.request did not carry
+    // it here (401 "not signed in").
+    const body = await page.evaluate(async () => {
+      const r = await fetch("/api/findings", { credentials: "same-origin" });
+      return r.json();
+    });
+    const doubleCharge = body.findings.find(
+      (f: { title: string }) => f.title === "A retried payment charges the customer twice",
+    );
+    expect(doubleCharge, "the demo sandbox seeds the double-charge finding").toBeTruthy();
+    expect(doubleCharge.run_id, "and that finding links to its run").toBeTruthy();
+    await page.goto(`/runs/${doubleCharge.run_id}`);
+
+    const approve = page.getByRole("button", { name: /^Approve/ });
+    await expect(approve).toBeVisible();
+    await expect(approve).toBeEnabled();
+    await expect(
+      page.getByText("Readers cannot approve a patch. Ask an owner or approver."),
+    ).toHaveCount(0);
+  });
 });

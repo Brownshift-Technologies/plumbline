@@ -183,6 +183,13 @@ def _seed_gate_fixture(repo: Repo) -> None:
         id=GATED_FINDING_ID, workspace_id=GATE_WORKSPACE_ID,
         title="A retried payment charges the customer twice", route="/checkout/payment",
         found_by="chaos", status="patch_ready", severity="high", repro_count=5,
+        # Links this finding to the gated run. GET /api/runs/{id} resolves
+        # finding_id via repo.finding_for_run(run_id), and RunDetail gates
+        # the whole "Proposed patch" section -- diff, Approve and merge,
+        # Reject -- behind that id. Without it the fixture rendered a gated
+        # run with no patch section at all, which is why the reader/owner
+        # test sat as test.fixme.
+        run_id=GATED_RUN_ID,
     ))
     repo.put_patch(Patch(
         id=f"patch_{GATED_FINDING_ID}", finding_id=GATED_FINDING_ID, diff=_GATE_DIFF,

@@ -142,7 +142,15 @@ export function RunDetail() {
   const isGated = Boolean(gatedStep) || patch?.gate_state === "awaiting_approval";
 
   let approveDisabledReason: string | null = null;
-  if (user?.role === "reader") {
+  if (user?.is_demo) {
+    // Mirrors app/finding_routes.py's _check_approve_permission, which
+    // returns early for a demo session: it holds no Membership row, so
+    // /api/auth/me reports role "reader", but it is the sole de-facto
+    // owner of its own sandbox workspace. Without this, the API allowed
+    // the approval and the UI disabled the button that triggers it --
+    // "Readers cannot approve a patch" on the demo's whole hero moment.
+    approveDisabledReason = null;
+  } else if (user?.role === "reader") {
     approveDisabledReason = "Readers cannot approve a patch. Ask an owner or approver.";
   } else if (isGated && user?.role !== "owner") {
     approveDisabledReason = "This patch is blocked at a gate. Only an owner can approve it.";

@@ -220,7 +220,12 @@ tbody tr:hover{background:#FBFAF8;cursor:pointer}
 .diff .add{background:#E9F5EE;color:#12603F}
 .diff .del{background:#FBEDEB;color:#96301F}
 .diff .ctx{color:var(--muted)}
-.diff .hunk{background:#F0EEEA;color:var(--faint)}
+/* --muted, not --faint: --faint (#6E6E66) on this #F0EEEA band is
+   4.44:1, just under WCAG AA's 4.5:1 for 12px text. --muted
+   (#5F5F59) is 5.55:1 and stays inside the signed-off palette.
+   Only reachable since the patch section started rendering at all,
+   so axe had never seen it. */
+.diff .hunk{background:#F0EEEA;color:var(--muted)}
 
 /* ---------- auth ---------- */
 .auth{min-height:100vh;display:grid;grid-template-columns:1fr 1fr;background:var(--white)}

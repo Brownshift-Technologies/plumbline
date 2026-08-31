@@ -68,6 +68,12 @@ def _finding_json(f: Finding) -> dict:
         "id": f.id, "workspace_id": f.workspace_id, "title": f.title, "route": f.route,
         "found_by": f.found_by, "status": f.status, "severity": f.severity,
         "seed": f.seed, "repro_count": f.repro_count, "at": f.at,
+        # Findings.tsx opens a finding with `if (f.run_id) navigate(...)`.
+        # This key was missing, so run_id was always undefined client-side
+        # and every row on the Findings screen was silently unclickable --
+        # the model carried the field and the seed set it, but the
+        # serialiser dropped it on the floor.
+        "run_id": f.run_id,
     }
 
 
