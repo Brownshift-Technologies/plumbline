@@ -4,13 +4,13 @@
 
 | Requirement | Where it happens |
 |---|---|
-| Short overview of the problem | B1, the sign-in page, first four paragraphs |
-| Value proposition | B1, "an agent that can write a test can write any file" |
-| Demo of the app in action | B1a to B5, the demo door, run 4471, the ledger |
-| **Backend running on Google Cloud** | **B6, three pages, about twenty-five seconds** |
+| Short overview of the problem | Slides 1 and 2 |
+| Value proposition | Slides 2 and 3 |
+| Demo of the app in action | B5 onward, the demo door, run 4471, the ledger |
+| **Backend running on Google Cloud** | **B5, three console pages, about twenty-five seconds** |
 
 The last one is pass/fail. A submission without visible Google Cloud evidence
-is eliminated before anyone scores the idea, so B6 is the highest-stakes part
+is eliminated before anyone scores the idea, so B5 is the highest-stakes part
 of the recording.
 
 ---
@@ -63,6 +63,15 @@ wrong, the page has not finished loading and you will be pointing at nothing.
 **Why:** `index.html` is served `no-store` now, but a browser that cached it
 before that fix will still hold an old bundle. One hard refresh clears it.
 
+## A4. Open the deck
+
+```bash
+xdg-open /home/rogerkorantenng/dev/Hackathons/plumbline/deck/index.html
+```
+
+Press `f` for full screen and leave it on slide 1. It is a separate window from
+the browser tabs below.
+
 ## Open these tabs, left to right, before you record
 
 Order matters. You move left to right and never go back.
@@ -85,16 +94,16 @@ xdg-open "https://console.cloud.google.com/apis/api/aiplatform.googleapis.com/me
 
 | Tab | Used at | For |
 |---|---|---|
-| 1 | B2 to B5, B7 | The app: the run, the gate, the ledger |
-| 2 | B6 | Cloud Run services, with the `.run.app` URL visible |
-| 3 | B6 | Job executions, the background work |
-| 4 | B6 | Vertex AI traffic |
+| 1 | B5 onward | The app: the demo door, the run, the gate, the ledger |
+| 2 | B5 | Cloud Run services, with the `.run.app` URL visible |
+| 3 | B5 | Job executions, the background work |
+| 4 | B5 | Vertex AI traffic |
 
 Use the Vertex **metrics** page, not Cloud Logging. `generateContent` calls do
 not appear in Cloud Logging unless data-access audit logging is on, and it is
 not. An empty log search on camera is worse than not looking.
 
-## A4. Set up OBS
+## A5. Set up OBS
 
 - 1920x1080, 30fps
 - Screen capture as one source, your microphone as a second, on the same
@@ -107,38 +116,73 @@ Close Slack, mail, and anything that shows notifications.
 
 # Part B, during the take
 
-## B1. The opening, on the sign-in page
+## B1 to B4. The deck, four slides
 
-Start with tab 1 showing **/signin**. Nothing to click for the first three
-paragraphs, ending at *"the ones that catch the expensive bugs."*
+`deck/index.html`. Open it, press `f` for full screen, arrow keys to advance.
+Nothing on any slide is clickable. Advance and speak.
 
-**You should see:** the headline *The test suite you never had time to write*,
-and at the top of the sign-in box the panel reading **Try the full product,
-free** with **Open the live demo** under it.
+Four slides for roughly the first half of the video, so each one holds for a
+while. They are built dense on purpose, two panels and a strip per slide, so
+the eye has somewhere to go while you talk and you are not sitting on an empty
+layout.
 
-**Why start here:** it is the page a judge lands on, and the opening is about a
-bug nobody wrote a test for. Talking over the sign-in screen keeps the first
-forty seconds on the problem rather than on a dashboard nobody can read yet.
+| Slide | Advance when you say |
+|---|---|
+| 1 · The bug, and why no test caught it | *(already up when you start)* |
+| 2 · Point an AI at it | "So point an AI at it..." |
+| 3 · Eleven agents, one gate | "Plumbline is eleven agents..." |
+| 4 · You do not have to take our word | "Plumbline is eleven agents..." (after the scopes line) |
 
-## B1a. When you say *"Anyone can try this. No account, no card."*
+Slide 1 carries the whole problem: the four-step sequence that double-charges a
+customer on the left, why no test exists on the right, and the cost strip
+underneath. It is the only moment that says who is harmed, so do not rush it.
 
-Gesture at the three provider buttons on the word "GitHub, Google or their own
-single sign-on", then click **Open the live demo**.
+Slide 2 is the pivot the company rests on. Stay on it through the whole "an
+agent that can write a test can write any file" paragraph.
+
+Slide 3 lists all eleven agents with their real tool scopes, so you never read
+them off the screen. Point at Runner, no model on purpose, and Economist, no
+write scope at all, as you reach them.
+
+Slide 4 lists the Google Cloud services and how a sceptic checks each claim.
+Hold it while you say "Let me show you where this runs", then leave the deck
+for the console. Do not advance past it, there is nothing after it.
+
+## B5. When you say *"Let me show you where this runs..."*
+
+Leave the deck. Move through tabs 2, 3 and 4, slowly enough that a paused frame
+is readable. About twenty-five seconds. This is the pass/fail requirement, so
+it happens before the product demo, not squeezed in after it.
+
+**Tab 2, Cloud Run services.** `plumbline-api` with its `.run.app` URL beside
+it. That single row covers both "Cloud Run dashboard" and "URL of .run".
+
+**Tab 3, Job executions.** `plumbline-worker` with completed executions.
+
+**Tab 4, Vertex AI metrics.** A live traffic graph. Point at it on the Gemini
+line. Use metrics, not Cloud Logging: `generateContent` calls do not appear in
+Cloud Logging unless data-access audit logging is on, and it is not.
+
+**Do not narrate the URLs.** Let the address bar do it.
+
+## B5a. When you say *"Anyone can try this. No account, no card."*
+
+Switch to tab 1, showing **/signin**.
+
+**You should see:** at the top of the sign-in box, the panel reading **Try the
+full product, free**, with **Open the live demo** under it.
+
+Gesture at the three provider buttons on the words "GitHub, Google or their own
+single sign-on", then **click Open the live demo**.
+
+**Do NOT click the provider buttons.** No OAuth credentials are configured on
+this deployment, so they redirect with an empty `client_id` and land on a
+provider error page.
 
 **You should see:** Home, with the blue sandbox banner, and in the left rail
 `Runs 18`, `Findings 6`, `Behaviours 99+`, `Agents 11`.
 
-**Do NOT click the GitHub, Google or Okta buttons.** No OAuth credentials are
-configured on this deployment, so they redirect with an empty `client_id` and
-land on a provider error page. Gesture and move on.
-
-**Why the click lands here:** everything after this sentence is narrated over
-the live product. The two paragraphs that follow, the workspace line and the
-"an agent that can write a test can write any file" pivot, are read with the
-dashboard already on screen, so the judge is looking at the thing while you
-explain why it needed a gate.
-
-## B2. When you say *"Here is a run..."*
+## B6. When you say *"Here is that payments bug, found..."*
 
 Click **Runs** in the left rail, then the row for **Run 4471**.
 
@@ -154,7 +198,7 @@ this run is replayed from a seeded fixture. Do not claim it is executing live.
 Everything you point at in it, the agents, the scopes, the gate, the ledger,
 is real.
 
-## B3. Through the agent paragraphs
+## B7. Through the agent paragraphs
 
 Let the reasoning chain sit on screen while you read the Cartographer, Chaos,
 Runner and Triager paragraphs. Point at each row as you name it.
@@ -168,7 +212,7 @@ payments-api`, `Runner saw two charges`, `Triager reproduced it 5 times out of
 says it chose 240ms because the provider's p99 is 210. That detail is what
 separates this from a tool that picked a round number.
 
-## B4. When you say *"Then Surgeon wrote the fix..."*
+## B8. When you say *"Then Surgeon wrote the fix..."*
 
 Scroll to **Proposed patch**.
 
@@ -183,28 +227,11 @@ agent merge anything under payments/\*.* The diff on
 entry will show their agent succeeding. You are showing yours stopping, and
 saying out loud why it cannot proceed. Do not rush it.
 
-## B5. Click Approve and merge
+## B9. Click Approve and merge
 
 Click it as you say *"A human signs it or it does not ship."*
 
-## B6. When you say *"Let me show you where this runs..."*
-
-Move through tabs 2, 3 and 4, slowly enough that a paused frame is readable.
-About twenty-five seconds.
-
-**Tab 2, Cloud Run services.** `plumbline-api` in the list with its `.run.app`
-URL beside it. That single row covers both "Cloud Run dashboard" and "URL of
-.run" from the requirements.
-
-**Tab 3, Job executions.** `plumbline-worker` with completed executions. This
-is the strongest single frame you have: an agent doing real background work.
-
-**Tab 4, Vertex AI metrics.** A live traffic graph. Point at it while you say
-the Gemini line.
-
-**Do not narrate the URLs.** Let the address bar do it.
-
-## B7a. When you say *"Plumbline is an MCP server..."*
+## B10. When you say *"Plumbline is an MCP server..."*
 
 Nothing to click. Say it over the ledger, which is already on screen.
 
@@ -218,7 +245,7 @@ If you do want it on screen, the honest shot is the tool manifest: eight tools,
 with `plumbline_approve_patch` visible to an owner key and absent from a
 reader's manifest. That is the role filter doing something you can see.
 
-## B7. When you say *"Every decision that gate made is here..."*
+## B11. When you say *"Every decision that gate made is here..."*
 
 Back to tab 1. Click **Audit ledger**, then click **Verify chain**.
 

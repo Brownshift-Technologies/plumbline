@@ -2,9 +2,9 @@
 
 `DEMO_STEPS.md` says where you switch screens and what you should see on each.
 
-Read straight through. Five hundred and eighty-four spoken words. That is about
-three fifty at a brisk pace, against a hard four-minute cap. The cap is hard,
-so do not slow down for effect. Practise it once against a timer before you
+Read straight through. Six hundred and six spoken words. That is about three
+fifty-five at a brisk pace, against a hard four-minute cap. The cap is hard, so
+do not slow down for effect. Practise it once against a timer before you
 record.
 
 ---
@@ -21,18 +21,25 @@ next sprint, every sprint. That is the problem. It is not that teams do not
 test. It is that the tests nobody writes are the ones that catch the expensive
 bugs.
 
+So point an AI at it. That is where the second problem starts. An agent that
+can write a test can write any file. An agent that can open a pull request can
+merge one. Whether a model can find a bug stopped being the interesting
+question. The question is what it is allowed to do the second it finds one.
+
+Plumbline is eleven agents that go looking for that bug, and one gate that
+everything they do passes through. Scopes live in code, so no customer setting
+can widen one. Gate rules are yours, per workspace and versioned.
+
+Let me show you where this runs. This is Google Cloud Run, and that is the
+service, live, on its run dot app address. That is the worker, a Cloud Run Job,
+one execution per run. And that is Vertex AI. Every request is Gemini three
+point five Flash.
+
 Anyone can try this. No account, no card. Teams sign in with email, or with
 GitHub, Google or their own single sign-on, but you need none of it to look
 around.
 
-This is a real workspace of your own, still here when you come back. Eleven
-agents, and one gate everything they do passes through.
-
-Because the second problem is the obvious fix. Point an AI at it, and now an
-agent that can write a test can write any file. An agent that can open a pull
-request can merge one. Whether a model can find a bug stopped being the
-interesting question. The question is what it is allowed to do the second it
-finds one.
+This is a real workspace of your own, still here when you come back.
 
 Here is that payments bug, found. Cartographer mapped forty-seven routes.
 Author turned plain English into a Playwright spec. Healer re-anchored four
@@ -56,20 +63,15 @@ prompt asks it politely. Merge is not in any agent's tool scope, and the
 Gateway checks the scope on every single call. A human signs it or it does not
 ship.
 
-Let me show you where this runs. This is Google Cloud Run, and that is the
-service, live, on its run dot app address. That is the worker, a Cloud Run Job,
-one execution per run. And that is Vertex AI. Every request is Gemini three
-point five Flash.
-
 Every decision that gate made is here, hash-chained. And you do not have to
 trust it. Verify re-signs every entry and checks it against the next.
 
 One more thing that gate buys us. Plumbline is an MCP server, so your coding
-agent can start a run or read a finding. And our agents are MCP clients, so
-they can call your servers. Both directions go through the same gate, so a tool
-on someone else's server gets the same scope check, the same ledger entry and
-the same redaction as one of ours. We screen the tool descriptions too, because
-a description is text a stranger wrote that ends up in our prompt.
+agent can start a run. And our agents are MCP clients, so they can call your
+servers. Both directions go through the same gate, so a tool on someone else's
+server gets the same scope check, the same ledger entry and the same redaction
+as one of ours. We screen the tool descriptions too, because a description is
+text a stranger wrote that ends up in our prompt.
 
 Eleven agents, one gate, and a person signing off before anything real changes.
 
